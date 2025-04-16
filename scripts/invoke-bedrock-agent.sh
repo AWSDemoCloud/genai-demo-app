@@ -62,7 +62,7 @@ if [[ ! -f $DIFF_FILE ]]; then
 fi
 
 # Check for binary data
-if file -I "$DIFF_FILE" | grep -q -v "text/"; then
+if file --mime "$DIFF_FILE" | grep -q -v "text/"; then
   echo "[ERROR] Diff contains binary/non-text data. Cannot process."
   exit 4
 fi
@@ -78,8 +78,9 @@ echo "[DEBUG] First 10 lines of diff.txt:"
 head -n 10 "$DIFF_FILE" || true
 
 # --- Create Prompt ---
-DIFF_CONTENT=$(cat "$DIFF_FILE")
-PROMPT="You are a senior engineer. Please convert this git diff into clear Markdown release notes describing what changed and why it matters:\n\n$DIFF_CONTENT"
+# Properly escape the diff content for JSON
+DIFF_CONTENT=$(cat "$DIFF_FILE" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed 's/\t/\\t/g' | sed 's/\r/\\r/g' | sed 's/\n/\\n/g')
+PROMPT="You are a senior engineer. Please convert this git diff into clear Markdown release notes describing what changed and why it matters:\\n\\n$DIFF_CONTENT"
 
 # --- Prepare Request JSON ---
 TMP_JSON=$(mktemp)
@@ -96,13 +97,13 @@ if [[ "$USE_AGENT" == "true" ]]; then
   # Create agent payload with optimized prompt for PR analysis
   PROMPT_PREFIX="You are a senior software engineer reviewing a GitHub Pull Request.\n\nPlease analyze this git diff and create a concise, well-formatted Markdown summary that:\n1. Describes what changed and why it matters\n2. Highlights any potential issues or improvements\n3. Organizes changes by component or feature\n\nGIT DIFF:\n"
   
-  jq -n \
-    --arg prompt_prefix "$PROMPT_PREFIX" \
-    --arg diff_content "$DIFF_CONTENT" \
-    '{
-      "inputText": $prompt_prefix + $diff_content,
-      "enableTrace": true
-    }' > "$TMP_JSON"
+  # Create JSON payload without using jq to avoid syntax issues
+  cat > "$TMP_JSON" << EOF
+{
+  "inputText": "${PROMPT_PREFIX}${DIFF_CONTENT}",
+  "enableTrace": true
+}
+EOF
   
   echo "[DEBUG] Agent Request JSON (truncated):"
   head -n 30 "$TMP_JSON"

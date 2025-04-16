@@ -4,6 +4,13 @@ on:
   pull_request:
     types: [opened, synchronize, reopened]
 
+# Define environment variables at the workflow level
+env:
+  AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
+  AWS_REGION: ${{ secrets.AWS_REGION }}
+  BEDROCK_AGENT_ID: ${{ secrets.BEDROCK_AGENT_ID }}
+  BEDROCK_AGENT_ALIAS_ID: ${{ secrets.BEDROCK_AGENT_ALIAS_ID }}
+
 permissions:
   id-token: write          # OIDC for AWS
   contents: read           # checkout / diff
@@ -26,9 +33,9 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN || secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
           role-session-name: amazon-q-${{ github.run_id }}
-          aws-region: ${{ vars.AWS_REGION || secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
       
       - name: Create diff for Amazon Q
         run: |
@@ -192,8 +199,8 @@ jobs:
         id: doc-generation
         if: ${{ hashFiles('diff.txt') != '' }}
         env:
-          AGENT_ID: ${{ vars.BEDROCK_AGENT_ID || secrets.BEDROCK_AGENT_ID }}
-          AGENT_ALIAS_ID: ${{ vars.BEDROCK_AGENT_ALIAS_ID || secrets.BEDROCK_AGENT_ALIAS_ID }}
+          AGENT_ID: ${{ env.BEDROCK_AGENT_ID }}
+          AGENT_ALIAS_ID: ${{ env.BEDROCK_AGENT_ALIAS_ID }}
         run: |
           chmod +x scripts/invoke-bedrock-agent.sh
           ./scripts/invoke-bedrock-agent.sh diff.txt doc.md
@@ -234,32 +241,45 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ vars.AWS_ROLE_ARN || secrets.AWS_ROLE_ARN }}
+          role-to-assume: ${{ env.AWS_ROLE_ARN }}
           role-session-name: pr-narrator-${{ github.run_id }}
-          aws-region: ${{ vars.AWS_REGION || secrets.AWS_REGION }}
+          aws-region: ${{ env.AWS_REGION }}
       
       - name: Invoke PR-Narrator Lambda
         id: invoke-lambda
         env:
           PR_NUMBER: ${{ github.event.pull_request.number }}
           REPO_NAME: ${{ github.repository }}
-          DOC_GENERATED: ${{ needs.bedrock-docs.outputs.doc-generated }}
+          DOC_GENERATED: ${{ needs.bedrock-docs.outputs.doc-generated || 'false' }}
           COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
           # Create payload for Lambda
           cat > lambda-payload.json << EOF
           {
-            "pr_number": "$PR_NUMBER",
-            "repository": "$REPO_NAME",
-            "commit_sha": "$COMMIT_SHA",
-            "doc_generated": "$DOC_GENERATED"
+            "pr_number": "${PR_NUMBER}",
+            "repository": "${REPO_NAME}",
+            "commit_sha": "${COMMIT_SHA}",
+            "doc_generated": "${DOC_GENERATED}"
           }
           EOF
+          
+          echo "Payload content:"
+          cat lambda-payload.json
+          
+          # Get Lambda function name from CloudFormation stack
+          LAMBDA_FUNCTION=$(aws cloudformation describe-stacks --stack-name genai-pr-enhancement --query "Stacks[0].Outputs[?OutputKey=='PRNarratorFunction'].OutputValue" --output text)
+          
+          if [ -z "$LAMBDA_FUNCTION" ]; then
+            echo "Could not find Lambda function ARN. Using default name 'pr-narrator'"
+            LAMBDA_FUNCTION="pr-narrator"
+          else
+            echo "Found Lambda function: $LAMBDA_FUNCTION"
+          fi
           
           # Invoke Lambda function
           echo "Invoking PR-Narrator Lambda..."
           aws lambda invoke \
-            --function-name pr-narrator \
+            --function-name "$LAMBDA_FUNCTION" \
             --payload file://lambda-payload.json \
             --cli-binary-format raw-in-base64-out \
             lambda-response.json
