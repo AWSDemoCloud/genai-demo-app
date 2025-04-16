@@ -18,13 +18,8 @@ OUTPUT_FILE=$2
 
 # --- Validate input file ---
 if [[ ! -f $DIFF_FILE ]]; then
-  echo "[ERROR] Diff file $DIFF_FILE not found"; exit 1
-fi
-
-# --- Check for binary/non-text data ---
-if file --mime-encoding "$DIFF_FILE" | grep -qv 'us-ascii\|utf-8'; then
-  echo "[ERROR] Diff contains binary/non-text data. Cannot process."
-  exit 4
+  echo "[ERROR] Diff file $DIFF_FILE not found"
+  exit 1
 fi
 
 if [[ ! -s $DIFF_FILE ]]; then
@@ -32,13 +27,30 @@ if [[ ! -s $DIFF_FILE ]]; then
   exit 0
 fi
 
-# --- Sanitize and prepare diff content ---
-SANITIZED_DIFF=$(jq -Rs . "$DIFF_FILE")
-PROMPT="You are a senior engineer. Convert this git diff into Markdown release notes describing changes and their impact:
+# --- Check for non-text (binary) data ---
+if file --mime "$DIFF_FILE" | grep -qv 'charset=us-ascii\|charset=utf-8'; then
+  echo "[ERROR] Diff contains binary or non-text data. Cannot process."
+  exit 4
+fi
+
+# --- Remove non-ASCII characters (Claude requires ASCII-only input) ---
+SANITIZED_DIFF=$(iconv -c -t ASCII//TRANSLIT < "$DIFF_FILE" | tr -d '\000-\037' || true)
+
+if [[ -z "$SANITIZED_DIFF" ]]; then
+  echo "[ERROR] Diff contains no valid ASCII content after sanitization."
+  exit 5
+fi
+
+echo "[DEBUG] diff.txt size: $(stat -c%s "$DIFF_FILE") bytes"
+echo "[DEBUG] First 10 lines of diff.txt:"
+head -n 10 "$DIFF_FILE" || true
+
+# --- Build prompt ---
+PROMPT="You are a senior engineer. Please convert this git diff into clear Markdown release notes describing what changed and why it matters:
 
 $SANITIZED_DIFF"
 
-# --- Create JSON payload ---
+# --- Build JSON payload ---
 TMP_JSON=$(mktemp)
 trap 'rm -f "$TMP_JSON" response.json' EXIT
 
@@ -52,10 +64,7 @@ jq -n \
       {
         "role": "user",
         "content": [
-          {
-            "type": "text",
-            "text": $prompt
-          }
+          { "type": "text", "text": $prompt }
         ]
       }
     ]
@@ -65,7 +74,7 @@ echo "[DEBUG] Input JSON:"
 cat "$TMP_JSON"
 
 # --- Validate JSON before invocation ---
-if ! jq -e . "$TMP_JSON" >/dev/null; then
+if ! jq . "$TMP_JSON" > /dev/null; then
   echo "[ERROR] Invalid JSON payload!"
   jq . "$TMP_JSON"
   exit 3
@@ -83,12 +92,12 @@ if ! aws bedrock-runtime invoke-model \
   exit 2
 fi
 
-# --- Process response ---
+# --- Extract and save documentation ---
 DOC_TEXT=$(jq -r '.content[0].text // empty' response.json)
 if [[ -z "$DOC_TEXT" ]]; then
-  echo "[ERROR] Empty response from Bedrock!"
+  echo "[ERROR] No content returned from Bedrock (empty DOC_TEXT)."
   exit 3
 fi
 
 echo "$DOC_TEXT" > "$OUTPUT_FILE"
-echo "[SUCCESS] Documentation saved to $OUTPUT_FILE"
+echo "[SUCCESS] Docs saved to $OUTPUT_FILE"
