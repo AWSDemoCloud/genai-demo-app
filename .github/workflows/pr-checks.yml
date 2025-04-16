@@ -81,11 +81,6 @@ jobs:
           head -n 10 diff.txt || true
           echo "Diff size:" $(stat -c%s diff.txt || echo 0) "bytes"
 
-      # --- Skip Bedrock call if diff is empty ----------------
-      - name: Skip if no changes
-        if: ${{ hashFiles('diff.txt') == '' }}
-        run: echo "No diff; skipping doc generation."
-
       # --- Invoke Bedrock agent / model ----------------------
       - name: Generate documentation via Bedrock
         if: ${{ hashFiles('diff.txt') != '' }}

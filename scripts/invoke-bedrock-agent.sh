@@ -40,12 +40,17 @@ EOF
 TMP_JSON=$(mktemp)
 trap 'rm -f "$TMP_JSON" response.json' EXIT
 jq -n \
-  --arg content "$PROMPT" \
+  --arg prompt "$PROMPT" \
   --argjson max_tokens "$MAX_TOKENS" \
   '{
      "anthropic_version": "bedrock-2023-05-31",
      "max_tokens": $max_tokens,
-     "messages": [ { "role": "user", "content": $content } ]
+     "messages": [
+       {
+         "role": "user",
+         "content": [ { "type": "text", "text": $prompt } ]
+       }
+     ]
    }' > "$TMP_JSON"
 
 echo "[DEBUG] Input JSON for Bedrock:"
