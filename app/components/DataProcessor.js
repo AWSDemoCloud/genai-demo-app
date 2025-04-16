@@ -12,19 +12,26 @@ class DataProcessor {
    * @param {Array} items - Data items to process
    */
   processItems(items) {
-    // Performance issue: Inefficient array manipulation
-    for (let i = 0; i < items.length; i++) {
-      const item = items[i];
-      // Process each item
-      this.processingQueue.push(item);
-      
-      // Inefficient nested loop
-      for (let j = 0; j < this.processingQueue.length; j++) {
-        console.log(`Processing item: ${j}`);
-      }
+    // Performance improvement: More efficient array handling
+    if (!Array.isArray(items)) {
+      throw new Error('Items must be an array');
     }
     
-    return this.processingQueue;
+    // Use map instead of a nested loop
+    const processedItems = items.map((item, index) => {
+      console.log(`Processing item: ${index}`);
+      return {
+        id: index,
+        value: item,
+        processed: true,
+        timestamp: new Date().toISOString()
+      };
+    });
+    
+    // Add to queue in a single operation
+    this.processingQueue = [...this.processingQueue, ...processedItems];
+    
+    return processedItems;
   }
   
   /**

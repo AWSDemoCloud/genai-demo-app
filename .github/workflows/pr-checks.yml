@@ -274,9 +274,12 @@ jobs:
           AUDIO_URL=$(cat lambda-response.json | jq -r '.body.audio_url // "https://example.com/pr-summary.mp3"')
           SUMMARY=$(cat lambda-response.json | jq -r '.body.summary // "PR summary not available"')
           
+          # Properly encode the summary to escape special characters and list formats
+          ENCODED_SUMMARY=$(echo "$SUMMARY" | base64)
+          
           # Use GitHub Actions output syntax for newer runners
           echo "audio-url=$AUDIO_URL" >> $GITHUB_OUTPUT
-          echo "summary=$SUMMARY" >> $GITHUB_OUTPUT
+          echo "summary-encoded=$ENCODED_SUMMARY" >> $GITHUB_OUTPUT
       
       - name: Post PR Comment with Audio Summary
         if: steps.invoke-lambda.outputs.audio-url != ''
@@ -285,10 +288,12 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const audioUrl = process.env.AUDIO_URL;
-            const summary = process.env.SUMMARY;
+            const encodedSummary = process.env.ENCODED_SUMMARY;
+            // Decode the summary from base64
+            const summary = Buffer.from(encodedSummary, 'base64').toString('utf-8');
             
             console.log('Audio URL: ' + audioUrl);
-            console.log('Summary: ' + summary);
+            console.log('Summary length: ' + summary.length);
             
             let commentBody = '## 🎙️ PR Audio Summary\n\n';
             commentBody += summary;
@@ -303,5 +308,5 @@ jobs:
             });
         env:
           AUDIO_URL: ${{ steps.invoke-lambda.outputs.audio-url }}
-          SUMMARY: ${{ steps.invoke-lambda.outputs.summary }}
+          ENCODED_SUMMARY: ${{ steps.invoke-lambda.outputs.summary-encoded }}
       
