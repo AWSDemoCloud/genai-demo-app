@@ -6,14 +6,12 @@ on:
 
 # Define environment variables at the workflow level
 env:
-  AWS_ROLE_ARN: ${{ secrets.AWS_ROLE_ARN }}
-  AWS_REGION: ${{ secrets.AWS_REGION }}
-  BEDROCK_AGENT_ID: ${{ secrets.BEDROCK_AGENT_ID }}
-  BEDROCK_AGENT_ALIAS_ID: ${{ secrets.BEDROCK_AGENT_ALIAS_ID }}
+  MODEL_ID: "anthropic.claude-3-sonnet-20240229-v1:0"
+  MAX_TOKENS: "1024"
 
 permissions:
   id-token: write          # OIDC for AWS
-  contents: read           # checkout / diff
+  contents: write          # checkout / diff / commit changes
   pull-requests: write     # let the auto‑docs job push commits
   checks: write            # allow posting check results
 
@@ -33,9 +31,9 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           role-session-name: amazon-q-${{ github.run_id }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ secrets.AWS_REGION }}
       
       - name: Create diff for Amazon Q
         run: |
@@ -212,12 +210,12 @@ jobs:
           # Generate documentation
           python scripts/bedrock-pr-docs.py diff.txt doc.md --model-id "$MODEL_ID"
           
-          # Set outputs for PR-Narrator
+          # Set outputs for PR-Narrator using the new environment file approach
           if [ -f doc.md ]; then
-            echo "::set-output name=doc-generated::true"
-            echo "::set-output name=doc-path::doc.md"
+            echo "doc-generated=true" >> $GITHUB_OUTPUT
+            echo "doc-path=doc.md" >> $GITHUB_OUTPUT
           else
-            echo "::set-output name=doc-generated::false"
+            echo "doc-generated=false" >> $GITHUB_OUTPUT
           fi
 
       # --- Commit auto‑generated docs ------------------------
@@ -248,9 +246,9 @@ jobs:
       - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
-          role-to-assume: ${{ env.AWS_ROLE_ARN }}
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           role-session-name: pr-narrator-${{ github.run_id }}
-          aws-region: ${{ env.AWS_REGION }}
+          aws-region: ${{ secrets.AWS_REGION }}
       
       - name: Invoke PR-Narrator Lambda
         id: invoke-lambda
