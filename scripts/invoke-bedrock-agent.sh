@@ -19,7 +19,8 @@ if [[ ! -f $DIFF_FILE ]]; then
   echo "[ERROR] Diff file $DIFF_FILE not found"; exit 1
 fi
 if [[ ! -s $DIFF_FILE ]]; then
-  echo "[ERROR] Diff file $DIFF_FILE is empty"; exit 1
+  echo "[INFO] Diff file $DIFF_FILE is empty; nothing to document. Exiting successfully."
+  exit 0
 fi
 
 echo "[DEBUG] diff.txt size: $(stat -c%s "$DIFF_FILE" 2>/dev/null || wc -c < "$DIFF_FILE") bytes"
