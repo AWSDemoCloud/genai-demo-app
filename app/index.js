@@ -12,5 +12,10 @@ if (require.main === module) {
   start();                 // CLI mode: node index.js
 }
 
+// This is a demo change to trigger auto-docs!
+function demoFeature() {
+  return "This will generate docs!";
+}
+
 console.log("Testing auto-docs workflow!");
 module.exports = { app, start };
