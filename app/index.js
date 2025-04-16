@@ -12,4 +12,5 @@ if (require.main === module) {
   start();                 // CLI mode: node index.js
 }
 
+console.log("Testing auto-docs workflow!");
 module.exports = { app, start };
