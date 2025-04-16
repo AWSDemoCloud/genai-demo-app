@@ -1,4 +1,4 @@
-Here is a concise Markdown summary of the provided git diff:
+Here's a concise Markdown summary of the provided git diff:
 
 ## Description of Changes
 
