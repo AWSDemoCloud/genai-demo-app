@@ -106,18 +106,7 @@ if [[ "$USE_AGENT" == "true" ]]; then
   echo "${PROMPT_PREFIX}${SANITIZED_DIFF}" > "$TEMP_CONTENT_FILE"
   
   # Create JSON payload using python to properly escape the JSON
-  python3 -c "
-  import json
-  import sys
-  with open('$TEMP_CONTENT_FILE', 'r') as f:
-      content = f.read()
-  payload = {
-      'inputText': content,
-      'enableTrace': True
-  }
-  with open('$TMP_JSON', 'w') as f:
-      json.dump(payload, f)
-  "
+  python3 -c "import json; import sys; f = open('$TEMP_CONTENT_FILE', 'r'); content = f.read(); f.close(); payload = {'inputText': content, 'enableTrace': True}; f = open('$TMP_JSON', 'w'); json.dump(payload, f); f.close()"
   
   # Clean up temp file
   rm -f "$TEMP_CONTENT_FILE"
@@ -136,15 +125,38 @@ if [[ "$USE_AGENT" == "true" ]]; then
   
   # Invoke Bedrock Agent
   echo "[INFO] Invoking Bedrock Agent..."
-  if ! aws bedrock-agent-runtime invoke-agent \
+  
+  # First try with bedrock-agent-runtime (newer API)
+  if aws bedrock-agent-runtime invoke-agent \
     --agent-id "$AGENT_ID" \
     --agent-alias-id "$AGENT_ALIAS_ID" \
     --session-id "$SESSION_ID" \
     --body "file://$TMP_JSON" \
-    response.json; then
-    echo "[ERROR] Bedrock Agent invocation failed!"
-    cat response.json || true
-    exit 2
+    response.json 2>/dev/null; then
+    
+    echo "[INFO] Successfully invoked Bedrock Agent with bedrock-agent-runtime"
+  
+  # If that fails, try with bedrock-agent (older API)
+  elif aws bedrock-agent invoke-agent \
+    --agent-id "$AGENT_ID" \
+    --agent-alias-id "$AGENT_ALIAS_ID" \
+    --session-id "$SESSION_ID" \
+    --body "file://$TMP_JSON" \
+    response.json 2>/dev/null; then
+    
+    echo "[INFO] Successfully invoked Bedrock Agent with bedrock-agent"
+  
+  # If both fail, report error
+  else
+    echo "[ERROR] Bedrock Agent invocation failed! Falling back to direct model invocation."
+    # Fall back to direct model invocation
+    USE_AGENT=false
+  fi
+  
+  # If agent invocation failed, try direct model invocation
+  if [[ "$USE_AGENT" == "false" ]]; then
+    echo "[INFO] Using direct model invocation as fallback"
+    # The rest of the script will handle this case
   fi
   
   # Calculate metrics for CloudWatch logging
