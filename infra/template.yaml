@@ -98,6 +98,15 @@ Resources:
                 Resource:
                   - !GetAtt AudioBucket.Arn
                   - !Sub '${AudioBucket.Arn}/*'
+        - PolicyName: LambdaAccess
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 'lambda:InvokeFunction'
+                  - 'lambda:GetFunction'
+                Resource: !GetAtt PRNarratorFunction.Arn
 
 Parameters:
   BedrockModelId:
