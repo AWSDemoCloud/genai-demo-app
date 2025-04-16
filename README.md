@@ -275,6 +275,237 @@ With the steps above you can **clone → deploy → PR** and watch:
 ## 🤝 Contributing
 Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](../../issues) or submit a pull request.
 
+## 🎭 Demo Scenarios
+
+Here are three comprehensive demo scenarios to showcase during your AWS session:
+
+### Demo 1: Code Quality Enhancement with Amazon Q Developer
+
+This scenario demonstrates how Amazon Q Developer automatically identifies code issues and security vulnerabilities in your PR.
+
+**Steps:**
+1. Create a new feature branch: `git checkout -b demo/security-vulnerability`
+2. Introduce a deliberate security vulnerability:
+   ```bash
+   echo 'const userQuery = `SELECT * FROM users WHERE id = ${req.params.id}`;' >> app/database.js
+   echo 'const secrets = {"api_key": "sk_test_51M7qPQLgMc5TcEi8RWvVoHlxU"}' >> app/config.js
+   ```
+3. Commit and create a pull request:
+   ```bash
+   git add .
+   git commit -m "Add user query functionality with direct parameters"
+   git push origin HEAD
+   gh pr create -t "Add user query feature" -b "This PR implements a user query feature."
+   ```
+
+**What to Observe:**
+- Amazon Q Developer will identify the SQL injection vulnerability in the code
+- It will also flag the hardcoded API key as a security risk
+- The PR check will automatically fail with detailed security findings
+- A comprehensive code review will appear in GitHub with suggested fixes
+
+### Demo 2: Automated PR Documentation with Bedrock
+
+This scenario showcases how Claude 3 Sonnet on Bedrock automatically generates comprehensive PR documentation.
+
+**Steps:**
+1. Create a new feature branch: `git checkout -b demo/feature-implementation`
+2. Add a substantial feature with clear purpose:
+   ```bash
+   # Create a new feature file
+   mkdir -p app/features
+   cat > app/features/dataProcessor.js << 'EOF'
+   /**
+    * Data Processor Module
+    * Handles transformation and validation of incoming data
+    */
+   
+   // Configuration for data processing
+   const CONFIG = {
+     maxBatchSize: 1000,
+     processingModes: ['sync', 'async', 'batch'],
+     validationRules: {
+       required: ['id', 'timestamp', 'source'],
+       numeric: ['amount', 'quantity'],
+       dateFormat: ['createdAt', 'updatedAt']
+     }
+   };
+   
+   /**
+    * Validates incoming data against schema
+    * @param {Object} data - The data object to validate
+    * @returns {Object} Validation result with errors if any
+    */
+   function validateData(data) {
+     const errors = [];
+     const { required, numeric, dateFormat } = CONFIG.validationRules;
+     
+     // Check required fields
+     for (const field of required) {
+       if (!data[field]) {
+         errors.push(`Missing required field: ${field}`);
+       }
+     }
+     
+     // Check numeric fields
+     for (const field of numeric) {
+       if (data[field] && isNaN(Number(data[field]))) {
+         errors.push(`Field ${field} must be numeric`);
+       }
+     }
+     
+     // Check date format fields
+     for (const field of dateFormat) {
+       if (data[field] && isNaN(Date.parse(data[field]))) {
+         errors.push(`Field ${field} must be a valid date`);
+       }
+     }
+     
+     return {
+       valid: errors.length === 0,
+       errors
+     };
+   }
+   
+   /**
+    * Transforms data according to specified processing mode
+    * @param {Object} data - The data to transform
+    * @param {String} mode - Processing mode (sync|async|batch)
+    * @returns {Object} Transformed data
+    */
+   function transformData(data, mode = 'sync') {
+     if (!CONFIG.processingModes.includes(mode)) {
+       throw new Error(`Invalid processing mode: ${mode}`);
+     }
+     
+     const result = { ...data };
+     
+     // Add metadata based on processing mode
+     result.metadata = {
+       processedAt: new Date().toISOString(),
+       mode,
+       version: '1.0.0'
+     };
+     
+     // Apply transformations based on mode
+     if (mode === 'batch') {
+       result.batchId = `batch_${Date.now()}`;
+     } else if (mode === 'async') {
+       result.callbackUrl = data.callbackUrl || 'https://api.example.com/callbacks';
+     }
+     
+     return result;
+   }
+   
+   /**
+    * Process data in batches
+    * @param {Array} dataArray - Array of data objects to process
+    * @returns {Object} Processing results with stats
+    */
+   function processBatch(dataArray) {
+     if (!Array.isArray(dataArray)) {
+       throw new Error('Input must be an array');
+     }
+     
+     if (dataArray.length > CONFIG.maxBatchSize) {
+       throw new Error(`Batch size exceeds maximum (${CONFIG.maxBatchSize})`);
+     }
+     
+     const results = {
+       processed: 0,
+       failed: 0,
+       items: []
+     };
+     
+     for (const item of dataArray) {
+       const validation = validateData(item);
+       
+       if (validation.valid) {
+         const transformed = transformData(item, 'batch');
+         results.items.push({
+           id: item.id,
+           status: 'processed',
+           result: transformed
+         });
+         results.processed++;
+       } else {
+         results.items.push({
+           id: item.id || 'unknown',
+           status: 'failed',
+           errors: validation.errors
+         });
+         results.failed++;
+       }
+     }
+     
+     return results;
+   }
+   
+   module.exports = {
+     validateData,
+     transformData,
+     processBatch,
+     CONFIG
+   };
+   EOF
+   ```
+3. Commit and create a pull request:
+   ```bash
+   git add .
+   git commit -m "Add data processor module with validation and transformation"
+   git push origin HEAD
+   gh pr create -t "Data processor implementation" -b "This PR implements a comprehensive data processing module with validation and transformation capabilities."
+   ```
+
+**What to Observe:**
+- The `bedrock-docs` job in the GitHub Action will process your PR
+- Claude will analyze the code changes and automatically generate the `doc.md` file
+- The generated documentation will include:
+  - Overview of the new feature
+  - Architecture and design decisions
+  - Key functionality and code organization
+  - Usage examples
+- The docs will be committed back to your PR branch automatically
+
+### Demo 3: PR Narrator Lambda with Audio Summary
+
+This demo showcases how the AWS Lambda function generates an audio summary of your PR using Bedrock's text-to-speech capabilities.
+
+**Steps:**
+1. Ensure your previous PR was created successfully
+2. The PR-Narrator Lambda will be triggered automatically
+3. Check the PR comments section for the audio summary link
+
+**What to Observe:**
+- The Lambda function receives PR details and generates a text summary
+- It then converts this summary to audio using Bedrock's Nova Sonic model
+- The audio file is stored in the S3 bucket created during deployment
+- A comment is posted to your PR with a link to the audio summary
+- When clicked, users can listen to a concise, professionally narrated overview of your PR
+
+## 🔄 Typical End-to-End Demo Flow
+
+For a comprehensive demo during your AWS session, follow this sequence:
+
+1. **Setup & Overview** (5 minutes)
+   - Walk through the architecture diagram and explain the components
+   - Show the GitHub Action workflow configuration
+   - Highlight the integration points between GitHub, AWS Lambda, and Bedrock
+
+2. **Live Demo** (15 minutes)
+   - Execute Demo 1: Security vulnerability detection with Amazon Q Developer
+   - Execute Demo 2: Automated documentation with Bedrock Claude
+   - Execute Demo 3: Audio narration with PR-Narrator Lambda
+
+3. **Behind the Scenes** (10 minutes)
+   - Show the Lambda function code and explain how it works
+   - Examine the Bedrock invocation scripts
+   - Discuss the architecture decisions and potential extensions
+
+4. **Q&A and Discussion** (5-10 minutes)
+
+This structured approach ensures a compelling demonstration that showcases the power of AWS generative AI services in a real-world development workflow.
+
 ## 📄 License
 This project is [MIT licensed](LICENSE).
 
