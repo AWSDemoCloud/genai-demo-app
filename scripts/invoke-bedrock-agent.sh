@@ -97,16 +97,30 @@ if [[ "$USE_AGENT" == "true" ]]; then
   # Create agent payload with optimized prompt for PR analysis
   PROMPT_PREFIX="You are a senior software engineer reviewing a GitHub Pull Request.\n\nPlease analyze this git diff and create a concise, well-formatted Markdown summary that:\n1. Describes what changed and why it matters\n2. Highlights any potential issues or improvements\n3. Organizes changes by component or feature\n\nGIT DIFF:\n"
   
-  # Create a sanitized version of the diff content
-  SANITIZED_DIFF=$(echo "$DIFF_CONTENT" | sed 's/[\x00-\x1F]//g' | sed 's/"/\\"/g')
+  # Create a sanitized version of the diff content - more aggressive cleaning
+  # Remove all control characters and escape quotes and backslashes
+  SANITIZED_DIFF=$(echo "$DIFF_CONTENT" | tr -d '\000-\037')
   
-  # Create JSON payload without using jq to avoid syntax issues
-  cat > "$TMP_JSON" << EOF
-{
-  "inputText": "${PROMPT_PREFIX}${SANITIZED_DIFF}",
-  "enableTrace": true
-}
-EOF
+  # Use a temporary file for the content first
+  TEMP_CONTENT_FILE=$(mktemp)
+  echo "${PROMPT_PREFIX}${SANITIZED_DIFF}" > "$TEMP_CONTENT_FILE"
+  
+  # Create JSON payload using python to properly escape the JSON
+  python3 -c "
+  import json
+  import sys
+  with open('$TEMP_CONTENT_FILE', 'r') as f:
+      content = f.read()
+  payload = {
+      'inputText': content,
+      'enableTrace': True
+  }
+  with open('$TMP_JSON', 'w') as f:
+      json.dump(payload, f)
+  "
+  
+  # Clean up temp file
+  rm -f "$TEMP_CONTENT_FILE"
   
   echo "[DEBUG] Agent Request JSON (truncated):"
   head -n 30 "$TMP_JSON"
