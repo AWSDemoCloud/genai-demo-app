@@ -1,7 +1,10 @@
 import json
 import os
 import boto3
+import http.client
 from botocore.exceptions import ClientError
+
+# Ensure all dependencies are imported and available
 
 s3 = boto3.client("s3")
 bedrock = boto3.client("bedrock-runtime")
@@ -87,7 +90,13 @@ def comment_on_github_pr(pr_number, owner, repo, token, presigned_url):
         "User-Agent": "narrator-lambda",
         "Accept": "application/vnd.github+json"
     }
-    conn.request("POST", path, json.dumps(comment_body), headers)
-    resp = conn.getresponse()
-    print("GitHub status", resp.status, resp.reason)
-    print(resp.read().decode())
+    try:
+        conn.request("POST", path, json.dumps(comment_body), headers)
+        resp = conn.getresponse()
+        print("GitHub status", resp.status, resp.reason)
+        print(resp.read().decode())
+    except Exception as e:
+        print(f"Failed to comment on GitHub PR: {e}")
+    finally:
+        conn.close()
+

@@ -67,16 +67,16 @@ jobs:
       # --- Build a robust diff -------------------------------
       - name: Create diff file
         run: |
-          git fetch --no-tags --prune --progress origin ${{ github.base_ref }}
-          BASE_REF="origin/${{ github.base_ref }}"
-          HEAD_REF="${{ github.head_ref }}"
-          git diff --binary "$BASE_REF...$HEAD_REF" > diff.txt || true
-
+          git fetch origin ${{ github.base_ref }}:${{ github.base_ref }}
+          git fetch origin ${{ github.head_ref }}:${{ github.head_ref }}
+          git checkout ${{ github.head_ref }}
+          git diff --binary ${{ github.base_ref }}...${{ github.head_ref }} > diff.txt || true
+      
           if [[ ! -s diff.txt ]]; then
             echo "No merge-base diff; using HEAD~1."
             git diff --binary HEAD~1 > diff.txt || true
           fi
-
+      
           echo "First 10 lines of diff:"
           head -n 10 diff.txt || true
           echo "Diff size:" $(stat -c%s diff.txt || echo 0) "bytes"
