@@ -297,12 +297,13 @@ jobs:
             EOF
           fi
           
-          # Extract audio URL
+          # Extract audio URL - ensure proper EOF termination
           AUDIO_URL=$(cat lambda-response.json | jq -r '.body.audio_url // "https://example.com/pr-summary.mp3"')
           SUMMARY=$(cat lambda-response.json | jq -r '.body.summary // "PR summary not available"')
           
-          echo "::set-output name=audio-url::$AUDIO_URL"
-          echo "::set-output name=summary::$SUMMARY"
+          # Use GitHub Actions output syntax for newer runners
+          echo "audio-url=$AUDIO_URL" >> $GITHUB_OUTPUT
+          echo "summary=$SUMMARY" >> $GITHUB_OUTPUT
       
       - name: Post PR Comment with Audio Summary
         if: steps.invoke-lambda.outputs.audio-url != ''
@@ -312,6 +313,9 @@ jobs:
           script: |
             const audioUrl = process.env.AUDIO_URL;
             const summary = process.env.SUMMARY;
+            
+            console.log(`Audio URL: ${audioUrl}`);
+            console.log(`Summary: ${summary}`);
             
             const comment = `## 🎙️ PR Audio Summary
             

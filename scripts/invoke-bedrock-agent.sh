@@ -78,9 +78,9 @@ echo "[DEBUG] First 10 lines of diff.txt:"
 head -n 10 "$DIFF_FILE" || true
 
 # --- Create Prompt ---
-# Properly escape the diff content for JSON
-DIFF_CONTENT=$(cat "$DIFF_FILE" | sed 's/\\/\\\\/g' | sed 's/"/\\"/g' | sed 's/\t/\\t/g' | sed 's/\r/\\r/g' | sed 's/\n/\\n/g')
-PROMPT="You are a senior engineer. Please convert this git diff into clear Markdown release notes describing what changed and why it matters:\\n\\n$DIFF_CONTENT"
+# Properly sanitize the diff content for JSON - remove control characters
+DIFF_CONTENT=$(cat "$DIFF_FILE" | tr -d '\000-\037')
+PROMPT="You are a senior engineer. Please convert this git diff into clear Markdown release notes describing what changed and why it matters:\n\n$DIFF_CONTENT"
 
 # --- Prepare Request JSON ---
 TMP_JSON=$(mktemp)
@@ -97,10 +97,13 @@ if [[ "$USE_AGENT" == "true" ]]; then
   # Create agent payload with optimized prompt for PR analysis
   PROMPT_PREFIX="You are a senior software engineer reviewing a GitHub Pull Request.\n\nPlease analyze this git diff and create a concise, well-formatted Markdown summary that:\n1. Describes what changed and why it matters\n2. Highlights any potential issues or improvements\n3. Organizes changes by component or feature\n\nGIT DIFF:\n"
   
+  # Create a sanitized version of the diff content
+  SANITIZED_DIFF=$(echo "$DIFF_CONTENT" | sed 's/[\x00-\x1F]//g' | sed 's/"/\\"/g')
+  
   # Create JSON payload without using jq to avoid syntax issues
   cat > "$TMP_JSON" << EOF
 {
-  "inputText": "${PROMPT_PREFIX}${DIFF_CONTENT}",
+  "inputText": "${PROMPT_PREFIX}${SANITIZED_DIFF}",
   "enableTrace": true
 }
 EOF
