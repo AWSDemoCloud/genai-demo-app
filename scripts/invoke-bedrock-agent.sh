@@ -3,38 +3,23 @@ set -e
 
 DIFF_FILE=$1
 OUTPUT_FILE=$2
+MODEL_ID="anthropic.claude-3-5-sonnet-20240620-v1:0"  # <-- NEW
 
-if [ -z "$DIFF_FILE" ] || [ -z "$OUTPUT_FILE" ]; then
-  echo "Usage: $0 <diff-file> <output-file>"
-  exit 1
-fi
+PROMPT=$(cat <<EOF
+You are a senior engineer documenting code changes. Convert this diff into clear Markdown docs.
 
-# 1) Prepare JSON input for Bedrock
-PROMPT="You are a senior engineer documenting code changes. Convert this diff into useful developer docs.\nDiff:\n$(cat $DIFF_FILE)"
-
-INPUT_JSON=$(cat <<EOF
-{
-  "prompt": "$PROMPT",
-  "maxTokens": 1024
-}
+Diff:
+$(cat "$DIFF_FILE")
 EOF
 )
 
-# 2) Invoke a hypothetical doc-agent in Bedrock
-# Replace agent or model IDs with your real references
+REQUEST=$(jq -n --arg p "$PROMPT" '{prompt:$p, max_tokens:1024}')
+
 aws bedrock-runtime invoke-model \
-  --modelId "anthropic.claude-3" \
-  --contentType "application/json" \
-  --body "$INPUT_JSON" \
+  --model-id "$MODEL_ID" \
+  --content-type "application/json" \
+  --body "$REQUEST" \
   response.json
 
-# 3) Parse the JSON output
-# Typically you'd parse "completion" or "generated_text" from the JSON
-DOC_TEXT=$(jq -r '.completion' response.json || echo "")
-if [ -z "$DOC_TEXT" ]; then
-  echo "No doc generated. Possibly an error."
-  exit 0
-fi
-
-echo "$DOC_TEXT" > $OUTPUT_FILE
-echo "Documentation saved to $OUTPUT_FILE"
+DOC_TEXT=$(jq -r '.completion // .generated_text // empty' response.json)
+echo "$DOC_TEXT" > "$OUTPUT_FILE"
