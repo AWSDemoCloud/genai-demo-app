@@ -68,11 +68,14 @@ fi
 echo "[INFO] Invoking Bedrock model: $MODEL_ID"
 RESPONSE_FILE="$TEMP_DIR/response.json"
 
+echo "[DEBUG] Using CLI binary format for AWS CLI"
+
 if aws bedrock-runtime invoke-model \
   --model-id "$MODEL_ID" \
   --content-type "application/json" \
   --accept "application/json" \
-  --body "file://$PAYLOAD_FILE" \
+  --body fileb://$PAYLOAD_FILE \
+  --cli-binary-format raw-in-base64-out \
   "$RESPONSE_FILE"; then
   
   # Extract the response

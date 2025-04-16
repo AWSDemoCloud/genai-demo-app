@@ -199,12 +199,18 @@ jobs:
         id: doc-generation
         if: ${{ hashFiles('diff.txt') != '' }}
         env:
-          AGENT_ID: ${{ env.BEDROCK_AGENT_ID }}
-          AGENT_ALIAS_ID: ${{ env.BEDROCK_AGENT_ALIAS_ID }}
           MODEL_ID: "anthropic.claude-3-sonnet-20240229-v1:0"
+          MAX_TOKENS: "1024"
+          AWS_REGION: ${{ env.AWS_REGION }}
         run: |
-          chmod +x scripts/invoke-bedrock-agent-simple.sh
-          ./scripts/invoke-bedrock-agent-simple.sh diff.txt doc.md
+          # Install boto3 if needed
+          pip install boto3
+          
+          # Make the Python script executable
+          chmod +x scripts/bedrock-pr-docs.py
+          
+          # Generate documentation
+          python scripts/bedrock-pr-docs.py diff.txt doc.md --model-id "$MODEL_ID"
           
           # Set outputs for PR-Narrator
           if [ -f doc.md ]; then
