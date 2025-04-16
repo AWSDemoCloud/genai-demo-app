@@ -237,7 +237,7 @@ async function fetchGitHubPRDetails(owner, repo, prNumber) {
 }
 
 /**
- * Generate audio using Bedrock Nova Sonic
+ * Generate audio using Bedrock Nova Sonic with enhanced SSML formatting
  * 
  * @param {string} text - The text to convert to audio
  * @returns {Promise<Buffer>} The audio data as a Buffer
@@ -246,14 +246,23 @@ async function generateAudio(text) {
   try {
     logger.info('Generating audio with Bedrock Nova Sonic');
     
-    // Prepare the request payload for Bedrock
+    // Format the text with SSML to enhance audio quality and engagement
+    const enhancedText = formatTextWithSSML(text);
+    
+    // Prepare the request payload for Bedrock with advanced settings
     const payload = JSON.stringify({
-      text: text,
+      text: enhancedText,
       voice_id: VOICE_ID,
-      accept_format: 'mp3'
+      accept_format: 'mp3',
+      // Add additional audio quality parameters
+      audio_config: {
+        sample_rate: 24000,     // Higher sample rate for better quality
+        encoding: 'mp3',
+        bit_rate: 320000       // Higher bit rate for clearer audio
+      }
     });
     
-    // Invoke Bedrock model
+    // Invoke Bedrock model with enhanced parameters
     const command = new InvokeModelCommand({
       modelId: BEDROCK_MODEL_ID,
       contentType: 'application/json',
@@ -267,6 +276,9 @@ async function generateAudio(text) {
       logger.debug('Test environment detected, returning mock audio data');
       return Buffer.from('Test audio data');
     }
+    
+    // Log request details for debugging
+    logger.debug('Bedrock request payload:', payload);
     
     // Make the actual API call to Bedrock
     const response = await bedrockClient.send(command);
@@ -282,6 +294,64 @@ async function generateAudio(text) {
     logger.error('Error generating audio with Bedrock:', error);
     throw new Error(`Failed to generate audio: ${error.message}`);
   }
+}
+
+/**
+ * Format text with SSML to enhance the audio narration
+ * 
+ * @param {string} text - The raw text to format
+ * @returns {string} SSML-formatted text
+ */
+function formatTextWithSSML(text) {
+  // Extract key sections for emphasis
+  const sections = text.split('\n\n').filter(section => section.trim() !== '');
+  
+  // Start with SSML wrapper
+  let ssmlText = '<speak>';
+  
+  // Add introduction with slight pause and emphasis
+  ssmlText += '<prosody rate="95%" pitch="+5%">';
+  ssmlText += '<emphasis level="moderate">Pull Request Summary</emphasis>';
+  ssmlText += '<break time="500ms"/>';
+  ssmlText += '</prosody>';
+  
+  // Process each section with appropriate SSML formatting
+  sections.forEach((section, index) => {
+    // Apply different voice characteristics based on content type
+    if (section.toLowerCase().includes('changes:') || 
+        section.toLowerCase().includes('summary:') || 
+        section.toLowerCase().includes('overview:')) {
+      // Section headers get special emphasis
+      const parts = section.split(':');
+      ssmlText += `<break time="300ms"/><prosody pitch="+10%"><emphasis level="strong">${parts[0]}:</emphasis></prosody>`;
+      if (parts.length > 1) {
+        ssmlText += `<prosody rate="100%">${parts.slice(1).join(':')}</prosody>`;
+      }
+    } else if (section.includes('•') || section.includes('-') || section.includes('*')) {
+      // List items get slight pauses and careful pronunciation
+      ssmlText += '<break time="200ms"/><prosody rate="95%">';
+      // Convert list markers for better narration
+      const formattedSection = section
+        .replace(/[•\-*]\s/g, '<break time="150ms"/>• ')
+        .replace(/\b(API|AWS|UI|JSON|HTTP|REST)\b/g, '<say-as interpret-as="spell-out">$1</say-as>');
+      ssmlText += formattedSection;
+      ssmlText += '</prosody>';
+    } else {
+      // Regular paragraphs
+      ssmlText += `<break time="300ms"/><prosody rate="100%">${section}</prosody>`;
+    }
+    
+    // Add pauses between sections
+    if (index < sections.length - 1) {
+      ssmlText += '<break time="500ms"/>';
+    }
+  });
+  
+  // Close the SSML
+  ssmlText += '<break time="300ms"/><prosody rate="95%" pitch="-5%">End of summary.</prosody>';
+  ssmlText += '</speak>';
+  
+  return ssmlText;
 }
 
 /**

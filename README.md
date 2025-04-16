@@ -1,8 +1,8 @@
-# GenAI Demo App (All-In-One)
+# GenAI PR Enhancement Pipeline
 
 [![AWS](https://img.shields.io/badge/built%20with-AWS-orange?logo=amazon-aws)](https://aws.amazon.com/) [![Node.js](https://img.shields.io/badge/node.js-18.x-brightgreen?logo=node.js)](https://nodejs.org/) [![License](https://img.shields.io/badge/license-MIT-blue.svg)](LICENSE)
 
-Welcome to the **GenAI Demo App**! This project is designed for AWS User Group sessions and workshops, providing a hands-on, end-to-end demonstration of generative AI and automation on AWS. 
+Welcome to the **GenAI PR Enhancement Pipeline**! This project showcases the power of AWS Generative AI services to revolutionize the developer experience by automating and enhancing the Pull Request workflow.
 
 > **Demo Author & Maintainer:**
 > - **Rahul Ladumor**  
@@ -10,32 +10,329 @@ Welcome to the **GenAI Demo App**! This project is designed for AWS User Group s
 
 ---
 
+## 💡 Purpose & Overview
+
+### What This Demo Solves
+
+Developers and teams face several challenges with pull requests:
+
+1. **Documentation Burden**: Writing comprehensive PR documentation is time-consuming
+2. **Quality Assurance**: Manual code reviews often miss security issues and best practices
+3. **Accessibility**: Understanding complex code changes through text alone can be difficult
+4. **Collaboration**: Explaining changes to non-technical stakeholders is challenging
+
+### How This Demo Solves These Challenges
+
+The GenAI PR Enhancement Pipeline addresses these challenges by creating an intelligent, fully automated workflow that:
+
+1. **Auto-generates Documentation**: Produces comprehensive, contextual documentation for each PR
+2. **Ensures Code Quality**: Automatically finds security vulnerabilities and suggests improvements
+3. **Creates Audio Summaries**: Transforms technical changes into accessible spoken narratives
+4. **Streamlines Collaboration**: Makes PR content understandable for all team members
+
+## 🖼 System Architecture 
+
+### High-Level Architecture Diagram
+
+```
+┌───────────────────┐       ┌───────────────────┐       ┌───────────────────┐
+│                   │       │                   │       │                   │
+│   GitHub          │       │   AWS Services    │       │   Outputs         │
+│                   │       │                   │       │                   │
+└───────┬───────────┘       └────────┬──────────┘       └───────────────────┘
+        │                            │
+        ▼                            │
+┌───────────────────┐                │
+│                   │                │
+│   Pull Request    │                │
+│   Created/Updated │                │
+│                   │                │
+└───────┬───────────┘                │
+        │                            │
+        ▼                            ▼
+┌───────────────────┐       ┌───────────────────┐       ┌───────────────────┐
+│                   │       │                   │       │                   │
+│   GitHub Action   │──────▶│   Amazon Q       │──────▶│   PR Check        │
+│   Workflow        │       │   Developer      │       │   Results         │
+│                   │       │                   │       │                   │
+└───────┬───────────┘       └───────────────────┘       └───────────────────┘
+        │                            ▲
+        │                            │
+        ▼                            │
+┌───────────────────┐                │
+│                   │                │
+│   Bedrock Claude  │────────────────┘       ┌───────────────────┐
+│   Invocation      │                        │                   │
+│                   │─────────────────────▶ │   Auto-Generated  │
+└───────┬───────────┘                        │   Documentation   │
+        │                                    │                   │
+        │                                    └───────────────────┘
+        ▼                                              ▲
+┌───────────────────┐       ┌───────────────────┐      │
+│                   │       │                   │      │
+│   Lambda          │──────▶│   Bedrock        │──────┘
+│   PR Narrator     │       │   Text-to-Speech │
+│                   │       │                   │
+└───────┬───────────┘       └───────┬───────────┘
+        │                            │
+        │                            ▼
+        │                   ┌───────────────────┐
+        │                   │                   │
+        │                   │   S3 Bucket       │
+        │                   │                   │
+        │                   └───────┬───────────┘
+        │                            │
+        ▼                            ▼
+┌───────────────────┐       ┌───────────────────┐
+│                   │       │                   │
+│   PR Comment      │◀──────│   Audio Summary   │
+│   with Link       │       │   URL             │
+│                   │       │                   │
+└───────────────────┘       └───────────────────┘
+```
+
+### Flow Explanation
+
+1. **Pull Request Trigger**:
+   - Developer creates or updates a PR in GitHub
+   - GitHub Actions workflow is automatically triggered
+
+2. **Parallel Processing**:
+   - **Path A**: Amazon Q Developer analyzes code for quality and security issues
+   - **Path B**: Bedrock Claude analyzes PR diff to generate documentation
+   - **Path C**: Lambda PR-Narrator orchestrates the audio summary creation
+
+3. **Documentation Generation**:
+   - Claude 3 Sonnet processes the PR diff
+   - Generates detailed Markdown documentation
+   - Documentation is committed back to the PR branch
+
+4. **Audio Summary Creation**:
+   - PR-Narrator Lambda fetches PR details
+   - Generates a concise summary
+   - Sends the summary to Bedrock Nova Sonic for TTS conversion
+   - Stores the audio file in S3
+   - Creates a pre-signed URL for access
+
+5. **Results Delivery**:
+   - PR check results from Amazon Q are displayed in GitHub
+   - Auto-generated documentation appears as a commit in the PR
+   - Audio summary link is posted as a comment on the PR
+
+This architecture leverages serverless components for maximum scalability and cost efficiency, with clear separation of concerns between services.
+
+## 💻 AWS Services Showcase
+
+This demo specifically highlights the following AWS services and their unique capabilities:
+
+### 1. Amazon Bedrock
+
+**What It Does**: Amazon Bedrock is a fully managed service that provides foundation models from leading AI companies through a unified API.
+
+**How We Use It**:
+- **Claude 3 Sonnet Model**: Analyzes PR diffs to generate high-quality documentation
+- **Nova Sonic TTS**: Converts PR summaries into natural-sounding audio narratives
+
+**Advantages for Your Projects**:
+- No ML expertise required to implement advanced GenAI capabilities
+- Pay-per-use pricing with no upfront commitments
+- Enterprise-grade security with your data and prompts kept private
+- Access to state-of-the-art models without infrastructure management
+
+### 2. Amazon Q Developer
+
+**What It Does**: Amazon Q Developer is an AI-powered assistant that helps developers build, enhance, and operate applications.
+
+**How We Use It**:
+- **Automated PR Reviews**: Scans code for security vulnerabilities, code quality issues, and best practices
+- **Suggested Fixes**: Provides actionable recommendations to improve code
+
+**Advantages for Your Projects**:
+- Embeds security best practices directly into your development workflow
+- Reduces time spent on manual code reviews
+- Helps developers learn better coding practices
+- Integrates seamlessly with existing GitHub workflows
+
+### 3. AWS Lambda
+
+**What It Does**: Lambda is a serverless compute service that lets you run code without provisioning or managing servers.
+
+**How We Use It**:
+- **PR Narrator Function**: Orchestrates the entire workflow from PR creation to audio generation
+- **GitHub Integration**: Processes webhook events and commits changes back to repositories
+
+**Advantages for Your Projects**:
+- Serverless architecture eliminates infrastructure management
+- Automatic scaling to handle any number of PRs
+- Cost-effective with pay-for-what-you-use pricing
+- High availability and fault tolerance built-in
+
+### 4. Amazon S3
+
+**What It Does**: S3 provides object storage for file storage and hosting.
+
+**How We Use It**:
+- **Audio Storage**: Stores the generated audio summaries
+- **Content Delivery**: Provides access to audio files via pre-signed URLs
+
+**Advantages for Your Projects**:
+- Highly durable and available storage
+- Cost-effective for varying storage needs
+- Built-in versioning and lifecycle management
+- Integrates with AWS security services
+
+### 5. AWS CloudFormation (via SAM)
+
+**What It Does**: CloudFormation lets you model and provision AWS resources using infrastructure as code.
+
+**How We Use It**:
+- **Infrastructure Definition**: Defines all required resources in a template
+- **Automated Deployment**: Ensures consistent and repeatable deployments
+
+**Advantages for Your Projects**:
+- Infrastructure as code for version control and repeatability
+- Automated deployments reduce human error
+- Simplified resource management across environments
+- Comprehensive dependency management
+
+---
+
 **📝 NOTE:**
-A full, copy-paste-friendly runbook for setup and deployment is included below for AWS User Group participants. See the [Full Setup & Deployment Guide](#-full-setup--deployment-guide) for a detailed walkthrough!
+This demo is designed for AWS Community Day sessions and provides a full, copy-paste-friendly runbook for setup and deployment. See the [Full Setup & Deployment Guide](#-full-setup--deployment-guide) for a detailed walkthrough!
 
 ---
 
-## ✨ What’s Inside?
-This repository demonstrates an end-to-end workflow using:
-- **Amazon Q Developer** for build/test/vulnerability scanning on PRs
-- **Bedrock Agents** for auto-documentation
-- **Nova Sonic** TTS to produce an audio summary (via a Lambda function)
-- **GitHub Actions** to wire it all together
+## 👀 What This Demo Does
+
+This repository demonstrates an intelligent GitHub Pull Request workflow using AWS GenAI services:
+
+1. **Auto Documentation**: Uses Amazon Bedrock's Claude 3 Sonnet to analyze PR changes and automatically generate comprehensive documentation
+2. **Code Quality**: Leverages Amazon Q Developer to detect security vulnerabilities and code issues
+3. **Audio Narration**: Creates spoken summaries of PRs using Bedrock's Nova Sonic voice AI
+4. **Seamless GitHub Integration**: Automates the entire workflow through GitHub Actions
 
 ---
 
-## 🚀 Quick Start
+## 🚀 Quick Setup (15 minutes)
 
-1. **Provision AWS Resources**
-   - Ensure you have an AWS account with access to Amazon Q Developer, Bedrock, and a region that supports them.
-   - Configure your CLI: `aws configure` or `aws configure sso`.
+### Prerequisites
 
-2. **Deploy the Narrator Lambda**
+- AWS Account with appropriate IAM permissions
+- GitHub repository where you want to implement this workflow
+- AWS CLI v2 installed and configured locally
+- AWS SAM CLI installed for deploying serverless resources
+- Basic understanding of GitHub Actions
+
+### Step 1: Set Up AWS Services
+
+1. **Enable Required AWS Services**:
+   ```bash
+   # Check if Bedrock is available in your region
+   aws bedrock list-foundation-models --region us-east-1
+   
+   # If not available, use a supported region like us-east-1 or us-west-2
+   aws configure set region us-east-1
+   ```
+
+2. **Create IAM Permissions**:
+   ```bash
+   # Create a policy for GitHub Actions
+   aws iam create-policy --policy-name GitHubActionsBedrockPolicy --policy-document file://aws-policy.json
+   ```
+
+   Save this as `aws-policy.json`:
+   ```json
+   {
+     "Version": "2012-10-17",
+     "Statement": [
+       {
+         "Effect": "Allow",
+         "Action": [
+           "bedrock:InvokeModel",
+           "s3:PutObject",
+           "s3:GetObject",
+           "lambda:InvokeFunction"
+         ],
+         "Resource": "*"
+       }
+     ]
+   }
+   ```
+
+### Step 2: Deploy the PR Narrator Lambda
+
+1. **Clone the Repository**:
+   ```bash
+   git clone https://github.com/yourusername/genai-demo-app.git
+   cd genai-demo-app
+   ```
+
+2. **Deploy Lambda Using SAM**:
    ```bash
    cd infra
    sam build
    sam deploy --guided
    ```
+
+3. **Note the Outputs**:
+   After successful deployment, note these outputs:
+   - `NarratorLambdaArn` - The Lambda function ARN
+   - `S3BucketName` - The S3 bucket for audio files
+   - `ApiEndpoint` - The API Gateway endpoint URL
+
+---
+
+### Step 3: Configure GitHub Integration
+
+1. **Set Up GitHub Secrets**:
+   - Go to your repository settings → Secrets and variables → Actions
+   - Add the following secrets:
+     - `AWS_ROLE_ARN`: IAM role ARN with permissions to invoke Bedrock and Lambda
+     - `AWS_REGION`: Region where you deployed your resources (e.g., `us-east-1`)
+     - `GITHUB_TOKEN`: Your GitHub personal access token with repo permissions
+
+2. **Add GitHub Actions Workflow**:
+   - Create a directory: `.github/workflows/`
+   - Copy the `pr-checks.yml` from this repository to your own
+
+3. **Update Workflow Configuration**:
+   - Modify the Lambda function name in the workflow file:
+     ```yaml
+     # Find this section in pr-checks.yml
+     env:
+       LAMBDA_FUNCTION: "your-lambda-function-name-from-sam-outputs"
+       MODEL_ID: "anthropic.claude-3-sonnet-20240229-v1:0"
+     ```
+
+### Step 4: Test the Integration
+
+1. **Create a Test Pull Request**:
+   ```bash
+   # Create a new branch
+   git checkout -b test/demo-feature
+   
+   # Make some changes
+   echo "// Test feature for demo" >> app/index.js
+   
+   # Commit and push
+   git add .
+   git commit -m "Add test feature for demo"
+   git push origin test/demo-feature
+   
+   # Create PR
+   gh pr create --title "Test PR for GenAI workflow" --body "This is a test PR to demonstrate the GenAI PR Enhancement workflow."
+   ```
+
+2. **Monitor Workflow Execution**:
+   - Go to your repository's Actions tab
+   - You should see the workflow running for your new PR
+   - Check the progress of each step: Amazon Q review, Bedrock documentation, and PR Narrator
+
+3. **View Results**:
+   - When complete, check your PR for:
+     - Automatically generated documentation in a new commit
+     - Code quality feedback from Amazon Q
+     - A comment with an audio summary link (click to listen!)
 
 ---
 
