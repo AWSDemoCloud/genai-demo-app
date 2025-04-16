@@ -38,8 +38,8 @@ SESSION_ID="$(uuidgen)"
 # Use PROMPT as input text for agent
 INPUT_TEXT="$PROMPT"
 
-# Call the Bedrock Agent
-if ! aws bedrock-agent-runtime invoke-agent \
+# Call the Bedrock Agent using the correct AWS CLI command
+if ! aws bedrock-agent-runtime retrieve-and-generate \
   --agent-id "$AGENT_ID" \
   --agent-alias-id "$AGENT_ALIAS_ID" \
   --session-id "$SESSION_ID" \
