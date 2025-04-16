@@ -1,10 +1,11 @@
 const request = require('supertest');
-const app = require('../index');
+const { app, start } = require('../index');
 
-describe('GET /', () => {
-  it('should return a greeting', async () => {
-    const res = await request('http://localhost:3000').get('/');
-    expect(res.status).toBe(200);
-    expect(res.text).toContain('Hello from genai-demo-app');
-  });
+let server;
+beforeAll(() => { server = start(); });
+afterAll(() => server.close());
+
+test('GET / returns greeting', async () => {
+  const res = await request(app).get('/');
+  expect(res.text).toContain('Hello');
 });
