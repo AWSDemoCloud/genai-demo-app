@@ -29,46 +29,35 @@ head -n 10 "$DIFF_FILE" || true
 
 PROMPT="Hello, Claude! Please summarize this diff."
 
-# Build JSON and write to a temp file
-TMP_JSON=$(mktemp)
-trap 'rm -f "$TMP_JSON" response.json' EXIT
-jq -n \
-  --arg prompt "$PROMPT" \
-  --argjson max_tokens "$MAX_TOKENS" \
-  '{
-     "anthropic_version": "bedrock-2023-05-31",
-     "max_tokens": $max_tokens,
-     "messages": [
-       {
-         "role": "user",
-         "content": [ { "type": "text", "text": $prompt } ]
-       }
-     ]
-   }' > "$TMP_JSON"
+# --- Bedrock Agent Invocation ---
+# TODO: Replace <YOUR_AGENT_ID> with your actual Bedrock Agent ID
+AGENT_ID="J1EYXCJDID"
+AGENT_ALIAS_ID="DEMOAWS"
+SESSION_ID="$(uuidgen)"
 
-echo "[DEBUG] Input JSON for Bedrock:"
-cat "$TMP_JSON"
-jq . "$TMP_JSON" || { echo "[ERROR] Invalid JSON!"; exit 3; }
+# Use PROMPT as input text for agent
+INPUT_TEXT="$PROMPT"
 
-echo "[DEBUG] Invoking Claude 3.5 Sonnet via Bedrock…"
-if ! aws bedrock-runtime invoke-model \
-  --model-id "$MODEL_ID" \
-  --content-type "application/json" \
-  --accept "application/json" \
-  --body file://"$TMP_JSON" \
+# Call the Bedrock Agent
+if ! aws bedrock-agent-runtime invoke-agent \
+  --agent-id "$AGENT_ID" \
+  --agent-alias-id "$AGENT_ALIAS_ID" \
+  --session-id "$SESSION_ID" \
+  --input-text "$INPUT_TEXT" \
   response.json; then
-  echo "[ERROR] Bedrock model invocation failed!"
+  echo "[ERROR] Bedrock agent invocation failed!"
   cat response.json || true
   exit 2
 fi
 
-echo "[DEBUG] Bedrock response:"
+echo "[DEBUG] Bedrock Agent response:"
 cat response.json
 
-DOC_TEXT=$(jq -r '.content[0].text // .content // empty' response.json || echo "")
+# Extract documentation text (adjust this jq filter as needed based on your agent's response schema)
+DOC_TEXT=$(jq -r '.completion // .output // .content // empty' response.json || echo "")
 
 if [[ -z "$DOC_TEXT" ]]; then
-  echo "[ERROR] No content returned from Bedrock (empty DOC_TEXT)."
+  echo "[ERROR] No content returned from Bedrock Agent (empty DOC_TEXT)."
   exit 3
 fi
 
