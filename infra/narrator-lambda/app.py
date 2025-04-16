@@ -1,7 +1,6 @@
 import json
 import os
 import boto3
-import requests
 from botocore.exceptions import ClientError
 
 s3 = boto3.client("s3")
@@ -78,15 +77,17 @@ def invoke_bedrock_nova_sonic(text_summary):
     return b"\x00\x01\x02FAKE_MP3_DATA\x03\x04"
 
 def comment_on_github_pr(pr_number, owner, repo, token, presigned_url):
-    comment_body = f":loud_sound: Here’s your audio summary: [Listen here]({presigned_url})"
-    url = f"https://api.github.com/repos/{owner}/{repo}/issues/{pr_number}/comments"
+    comment_body = {
+        "body": f":loud_sound: Here’s your audio summary: [Listen here]({presigned_url})"
+    }
+    conn = http.client.HTTPSConnection("api.github.com")
+    path = f"/repos/{owner}/{repo}/issues/{pr_number}/comments"
     headers = {
         "Authorization": f"Bearer {token}",
-        "Accept": "application/vnd.github.v3+json"
+        "User-Agent": "narrator-lambda",
+        "Accept": "application/vnd.github+json"
     }
-    data = {"body": comment_body}
-    try:
-        r = requests.post(url, headers=headers, json=data, timeout=10)
-        r.raise_for_status()
-    except Exception as e:
-        print(f"Failed to comment on PR: {e}")
+    conn.request("POST", path, json.dumps(comment_body), headers)
+    resp = conn.getresponse()
+    print("GitHub status", resp.status, resp.reason)
+    print(resp.read().decode())

@@ -1,13 +1,15 @@
 const express = require('express');
 const app = express();
 
-// Simple endpoint
-app.get('/', (req, res) => {
-  res.send('Hello from genai-demo-app!');
-});
+app.get('/', (_, res) => res.send('Hello'));
 
-const PORT = process.env.PORT || 3000;
-app.listen(PORT, () => {
-  console.log(`Server running on port ${PORT}`);
-});
-const query = "SELECT * FROM users WHERE id = " + userId;
+function start() {
+  const PORT = process.env.PORT || 3000;
+  return app.listen(PORT, () => console.log(`Server on ${PORT}`));
+}
+
+if (require.main === module) {
+  start();                 // CLI mode: node index.js
+}
+
+module.exports = { app, start };

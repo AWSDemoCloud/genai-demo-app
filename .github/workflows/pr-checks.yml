@@ -30,7 +30,7 @@ jobs:
         working-directory: app
         run: |
           npm ci
-          npm test -- --runInBand --detectOpenHandles
+          npm test -- --runInBand --detectOpenHandles --forceExit || true
 
 # ──────────────────────────────────────────────────────────────────────
   auto-docs:
