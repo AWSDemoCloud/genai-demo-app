@@ -195,15 +195,16 @@ jobs:
           echo "Diff size:" $(stat -c%s diff.txt || echo 0) "bytes"
 
       # --- Invoke Bedrock agent / model ----------------------
-      - name: Generate documentation via Bedrock
+      - name: Generate PR Documentation
         id: doc-generation
         if: ${{ hashFiles('diff.txt') != '' }}
         env:
           AGENT_ID: ${{ env.BEDROCK_AGENT_ID }}
           AGENT_ALIAS_ID: ${{ env.BEDROCK_AGENT_ALIAS_ID }}
+          MODEL_ID: "anthropic.claude-3-sonnet-20240229-v1:0"
         run: |
-          chmod +x scripts/invoke-bedrock-agent.sh
-          ./scripts/invoke-bedrock-agent.sh diff.txt doc.md
+          chmod +x scripts/invoke-bedrock-agent-simple.sh
+          ./scripts/invoke-bedrock-agent-simple.sh diff.txt doc.md
           
           # Set outputs for PR-Narrator
           if [ -f doc.md ]; then
