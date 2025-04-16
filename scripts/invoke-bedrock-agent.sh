@@ -27,14 +27,7 @@ echo "[DEBUG] diff.txt size: $(stat -c%s "$DIFF_FILE" 2>/dev/null || wc -c < "$D
 echo "[DEBUG] First 10 lines of diff.txt:"
 head -n 10 "$DIFF_FILE" || true
 
-PROMPT="$(cat <<EOF
-You are a senior engineer. Convert this git diff into clear Markdown release notes.
-
-\`\`\`diff
-$(cat "$DIFF_FILE")
-\`\`\`
-EOF
-)"
+PROMPT="Hello, Claude! Please summarize this diff."
 
 # Build JSON and write to a temp file
 TMP_JSON=$(mktemp)
@@ -55,6 +48,7 @@ jq -n \
 
 echo "[DEBUG] Input JSON for Bedrock:"
 cat "$TMP_JSON"
+jq . "$TMP_JSON" || { echo "[ERROR] Invalid JSON!"; exit 3; }
 
 echo "[DEBUG] Invoking Claude 3.5 Sonnet via Bedrock…"
 if ! aws bedrock-runtime invoke-model \
