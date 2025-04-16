@@ -53,18 +53,20 @@ jobs:
       # --- Generate diff of PR changes ---
       - name: Create diff file
         run: |
-          # Ensure we have the full history for merge-base calculation
-          git fetch --no-tags --prune --progress --no-recurse-submodules --depth=0 origin ${{ github.base_ref }}
-          
-          # Use GitHub vars so it works with non-main default branches
+          # --- OPTION A: full fetch of base ref (preferred) ---
+          git fetch --no-tags --prune --progress origin ${{ github.base_ref }}
+      
+          # If you prefer OPTION B, comment the line above and uncomment the next:
+          # git fetch --unshallow
+      
           BASE_REF="origin/${{ github.base_ref }}"
           HEAD_REF="${{ github.head_ref }}"
-          
+      
           echo "Diffing $BASE_REF...$HEAD_REF"
           git diff --binary "$BASE_REF...$HEAD_REF" > diff.txt || true
-          
+      
           if [ ! -s diff.txt ]; then
-            echo "No diff generated (possibly first commit). Falling back to HEAD~1."
+            echo "No diff via merge-base; falling back to previous commit."
             git diff --binary HEAD~1 > diff.txt || true
           fi
 
