@@ -202,6 +202,10 @@ if [[ "$USE_AGENT" == "false" ]]; then
   trap 'rm -f "$MODEL_PAYLOAD_FILE" 2>/dev/null' EXIT
   
   # Create the payload for Anthropic Claude
+  # Escape the content properly for JSON
+  ESCAPED_CONTENT=$(python3 -c "import json; import sys; print(json.dumps('${PROMPT_PREFIX}${DIFF_CONTENT}')[1:-1])")
+  
+  # Create the payload with proper JSON structure
   cat > "$MODEL_PAYLOAD_FILE" << EOF
 {
   "anthropic_version": "bedrock-2023-05-31",
@@ -212,7 +216,7 @@ if [[ "$USE_AGENT" == "false" ]]; then
       "content": [
         {
           "type": "text",
-          "text": "${PROMPT_PREFIX}${DIFF_CONTENT}"
+          "text": "$ESCAPED_CONTENT"
         }
       ]
     }
@@ -220,13 +224,25 @@ if [[ "$USE_AGENT" == "false" ]]; then
 }
 EOF
   
+  # Validate the JSON payload
+  if ! jq . "$MODEL_PAYLOAD_FILE" > /dev/null 2>&1; then
+    echo "[ERROR] Invalid JSON payload for model invocation!"
+    cat "$MODEL_PAYLOAD_FILE"
+    exit 3
+  fi
+  
+  # Log the payload for debugging
+  echo "[DEBUG] Model payload (first 100 chars):"
+  head -c 100 "$MODEL_PAYLOAD_FILE"
+  echo "..."
+  
   # Invoke the Bedrock model directly
   echo "[INFO] Invoking Bedrock model directly: $MODEL_ID"
   if aws bedrock-runtime invoke-model \
     --model-id "$MODEL_ID" \
+    --content-type "application/json" \
+    --accept "application/json" \
     --body "file://$MODEL_PAYLOAD_FILE" \
-    --cli-binary-format raw-in-base64-out \
-    --output json \
     model-response.json; then
     
     # Calculate metrics
