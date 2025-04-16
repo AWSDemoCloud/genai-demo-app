@@ -1,0 +1,132 @@
+AWSTemplateFormatVersion: '2010-09-09'
+Transform: AWS::Serverless-2016-10-31
+
+Description: >
+  PR-Narrator Infrastructure
+  SAM Template for deploying the PR-Narrator Lambda function and related resources
+
+# Global values that apply to all resources in this template
+Globals:
+  Function:
+    Timeout: 30
+    MemorySize: 256
+    Runtime: nodejs18.x
+    Architectures:
+      - arm64
+    Environment:
+      Variables:
+        LOG_LEVEL: INFO
+        USE_POLLY_FALLBACK: 'true'
+
+Resources:
+  # S3 bucket for storing audio files
+  AudioBucket:
+    Type: AWS::S3::Bucket
+    Properties:
+      BucketName: !Sub "${AWS::StackName}-audio-${AWS::AccountId}"
+      LifecycleConfiguration:
+        Rules:
+          - Id: DeleteOldFiles
+            Status: Enabled
+            ExpirationInDays: 30
+      CorsConfiguration:
+        CorsRules:
+          - AllowedHeaders:
+              - '*'
+            AllowedMethods:
+              - GET
+            AllowedOrigins:
+              - '*'
+            MaxAge: 3600
+
+  # Lambda function for PR narration
+  PRNarratorFunction:
+    Type: AWS::Serverless::Function
+    Properties:
+      CodeUri: ../lambda/pr-narrator/
+      Handler: index.handler
+      Description: Generates audio summaries of PR changes using AWS Bedrock
+      Policies:
+        - S3CrudPolicy:
+            BucketName: !Ref AudioBucket
+        - Statement:
+            - Effect: Allow
+              Action:
+                - bedrock:InvokeModel
+                - polly:SynthesizeSpeech
+              Resource: '*'
+      Environment:
+        Variables:
+          S3_BUCKET_NAME: !Ref AudioBucket
+          BEDROCK_MODEL_ID: !Ref BedrockModelId
+          VOICE_ID: !Ref VoiceId
+      Events:
+        ApiEvent:
+          Type: Api
+          Properties:
+            Path: /narrate
+            Method: post
+
+  # IAM role for GitHub Actions
+  GitHubActionsRole:
+    Type: AWS::IAM::Role
+    Properties:
+      AssumeRolePolicyDocument:
+        Version: '2012-10-17'
+        Statement:
+          - Effect: Allow
+            Principal:
+              Federated: !Sub 'arn:aws:iam::${AWS::AccountId}:oidc-provider/token.actions.githubusercontent.com'
+            Action: 'sts:AssumeRoleWithWebIdentity'
+            Condition:
+              StringEquals:
+                'token.actions.githubusercontent.com:aud': 'sts.amazonaws.com'
+              StringLike:
+                'token.actions.githubusercontent.com:sub': 'repo:*:*'
+      ManagedPolicyArns:
+        - 'arn:aws:iam::aws:policy/AmazonBedrockFullAccess'
+      Policies:
+        - PolicyName: S3Access
+          PolicyDocument:
+            Version: '2012-10-17'
+            Statement:
+              - Effect: Allow
+                Action:
+                  - 's3:GetObject'
+                  - 's3:PutObject'
+                  - 's3:ListBucket'
+                Resource:
+                  - !GetAtt AudioBucket.Arn
+                  - !Sub '${AudioBucket.Arn}/*'
+
+Parameters:
+  BedrockModelId:
+    Type: String
+    Default: 'anthropic.claude-3-sonnet-20240229-v1:0'
+    Description: The Bedrock model ID to use for generating audio
+  
+  VoiceId:
+    Type: String
+    Default: 'alloy'
+    Description: The voice ID to use for generating audio
+
+Outputs:
+  PRNarratorApi:
+    Description: "API Gateway endpoint URL for Prod stage for PR Narrator function"
+    Value: !Sub "https://${ServerlessRestApi}.execute-api.${AWS::Region}.amazonaws.com/Prod/narrate/"
+  
+  PRNarratorFunction:
+    Description: "PR Narrator Lambda Function ARN"
+    Value: !GetAtt PRNarratorFunction.Arn
+  
+  PRNarratorFunctionRole:
+    Description: "Implicit IAM Role created for PR Narrator function"
+    Value: !GetAtt PRNarratorFunctionRole.Arn
+  
+  AudioBucketName:
+    Description: "S3 bucket for storing audio files"
+    Value: !Ref AudioBucket
+  
+  GitHubActionsRoleArn:
+    Description: "IAM Role ARN for GitHub Actions"
+    Value: !GetAtt GitHubActionsRole.Arn
