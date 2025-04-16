@@ -27,13 +27,14 @@ echo "[DEBUG] diff.txt size: $(stat -c%s "$DIFF_FILE" 2>/dev/null || wc -c < "$D
 echo "[DEBUG] First 10 lines of diff.txt:"
 head -n 10 "$DIFF_FILE" || true
 
-read -r -d '' PROMPT <<EOF
+PROMPT="$(cat <<EOF
 You are a senior engineer. Convert this git diff into clear Markdown release notes.
 
 \`\`\`diff
 $(cat "$DIFF_FILE")
 \`\`\`
 EOF
+)"
 
 # Build JSON and write to a temp file
 TMP_JSON=$(mktemp)
