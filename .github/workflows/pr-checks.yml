@@ -1,24 +1,26 @@
-name: PR Checks
+name: PR Checks & Auto‑Docs
 
 on:
   pull_request:
 
 permissions:
-  id-token: write      # ✅ OIDC
-  contents: read       # ✅ checkout / diff
-  pull-requests: write # ✅ allow auto‑docs job to push commits & comments
+  id-token: write          # OIDC for AWS
+  contents: read           # checkout / diff
+  pull-requests: write     # let the auto‑docs job push commits
 
 jobs:
-# ──────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────
   build-and-test:
-    name: Build & Jest Tests
+    name: Build & Jest
     runs-on: ubuntu-latest
-    continue-on-error: true        # <-- keep the demo flowing even on failure
+    timeout-minutes: 5
+    continue-on-error: true      # demo keeps flowing even on red tests
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      - name: Setup Node (LTS) & cache
+      - name: Setup Node (LTS) + cache
         uses: actions/setup-node@v4
         with:
           node-version: 20
@@ -26,69 +28,80 @@ jobs:
           cache-dependency-path: |
             app/package-lock.json
 
-      - name: Install deps & run tests
+      - name: Install deps
         working-directory: app
         run: |
-          npm ci
+          npm ci --no-audit --no-fund --loglevel=error
+
+      - name: Run Jest (force‑exit)
+        working-directory: app
+        run: |
           npm test -- --runInBand --detectOpenHandles --forceExit || true
 
-# ──────────────────────────────────────────────────────────────────────
+# ──────────────────────────────────────────────────────────────
   auto-docs:
     name: Generate Docs via Bedrock
     runs-on: ubuntu-latest
-    needs: build-and-test           # still runs even if previous job failed
+    needs: build-and-test
+    timeout-minutes: 10
+
     steps:
       - name: Checkout code
         uses: actions/checkout@v4
 
-      # --- AWS OIDC authentication ---
-      - name: Configure AWS credentials (OIDC)
-        id: aws-creds
+      # --- Debug info (size of diff + jq path) ---------------
+      - name: Pre‑flight debug
+        run: |
+          which jq || true
+          echo "jq version:" $(jq --version || echo "missing")
+          echo "HEAD is" $(git rev-parse --short HEAD)
+
+      # --- Configure AWS creds via OIDC ----------------------
+      - name: Configure AWS credentials
         uses: aws-actions/configure-aws-credentials@v4
         with:
           role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
           role-session-name: docs-bot-${{ github.run_id }}
           aws-region: ${{ secrets.AWS_REGION }}
 
-      # --- Generate diff of PR changes ---
+      # --- Build a robust diff -------------------------------
       - name: Create diff file
         run: |
-          # --- OPTION A: full fetch of base ref (preferred) ---
           git fetch --no-tags --prune --progress origin ${{ github.base_ref }}
-      
-          # If you prefer OPTION B, comment the line above and uncomment the next:
-          # git fetch --unshallow
-      
           BASE_REF="origin/${{ github.base_ref }}"
           HEAD_REF="${{ github.head_ref }}"
-      
-          echo "Diffing $BASE_REF...$HEAD_REF"
           git diff --binary "$BASE_REF...$HEAD_REF" > diff.txt || true
-      
-          if [ ! -s diff.txt ]; then
-            echo "No diff via merge-base; falling back to previous commit."
+
+          if [[ ! -s diff.txt ]]; then
+            echo "No merge-base diff; using HEAD~1."
             git diff --binary HEAD~1 > diff.txt || true
           fi
 
-      # --- Quick preview (optional) ---
-      - name: Preview first 20 lines of diff
-        run: head -n 20 diff.txt
+          echo "First 10 lines of diff:"
+          head -n 10 diff.txt || true
+          echo "Diff size:" $(stat -c%s diff.txt || echo 0) "bytes"
 
-      # --- Invoke Bedrock agent ---
-      - name: Run Bedrock doc agent
+      # --- Skip Bedrock call if diff is empty ----------------
+      - name: Skip if no changes
+        if: ${{ hashFiles('diff.txt') == '' }}
+        run: echo "No diff; skipping doc generation."
+
+      # --- Invoke Bedrock agent / model ----------------------
+      - name: Generate documentation via Bedrock
+        if: ${{ hashFiles('diff.txt') != '' }}
         run: |
           chmod +x scripts/invoke-bedrock-agent.sh
           ./scripts/invoke-bedrock-agent.sh diff.txt doc.md
 
-      # --- Commit docs back to PR branch ---
-      - name: Commit generated docs
-        if: success() && (hashFiles('doc.md') != '')
+      # --- Commit auto‑generated docs ------------------------
+      - name: Commit documentation
+        if: success() && ${{ hashFiles('doc.md') != '' }}
         env:
           GH_TOKEN: ${{ github.token }}
         run: |
-          git config --global user.name  "doc-bot"
-          git config --global user.email "doc-bot@genai-demo.local"
+          git config --global user.name  "doc‑bot"
+          git config --global user.email "doc‑bot@genai-demo.local"
           git checkout ${{ github.head_ref }}
           git add doc.md
-          git commit -m "🤖 Auto-generated docs via Bedrock Agent" || echo "Nothing to commit"
+          git commit -m "🤖 Auto‑generated docs via Bedrock" || echo "Nothing to commit"
           git push origin ${{ github.head_ref }}
