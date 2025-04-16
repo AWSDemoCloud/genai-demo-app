@@ -62,7 +62,7 @@ if [[ ! -f $DIFF_FILE ]]; then
 fi
 
 # Check for binary data
-if file -I "$DIFF_FILE" | grep -q -v "text/"; then
+if file --mime "$DIFF_FILE" | grep -q -v "text/"; then
   echo "[ERROR] Diff contains binary/non-text data. Cannot process."
   exit 4
 fi
@@ -78,12 +78,13 @@ echo "[DEBUG] First 10 lines of diff.txt:"
 head -n 10 "$DIFF_FILE" || true
 
 # --- Create Prompt ---
-DIFF_CONTENT=$(cat "$DIFF_FILE")
+# Properly sanitize the diff content for JSON - remove control characters
+DIFF_CONTENT=$(cat "$DIFF_FILE" | tr -d '\000-\037')
 PROMPT="You are a senior engineer. Please convert this git diff into clear Markdown release notes describing what changed and why it matters:\n\n$DIFF_CONTENT"
 
 # --- Prepare Request JSON ---
 TMP_JSON=$(mktemp)
-trap 'rm -f "$TMP_JSON" response.json' EXIT
+trap 'rm -f "$TMP_JSON" response.json model-response.json 2>/dev/null' EXIT
 
 if [[ "$USE_AGENT" == "true" ]]; then
   # Start timing for metrics
@@ -96,120 +97,189 @@ if [[ "$USE_AGENT" == "true" ]]; then
   # Create agent payload with optimized prompt for PR analysis
   PROMPT_PREFIX="You are a senior software engineer reviewing a GitHub Pull Request.\n\nPlease analyze this git diff and create a concise, well-formatted Markdown summary that:\n1. Describes what changed and why it matters\n2. Highlights any potential issues or improvements\n3. Organizes changes by component or feature\n\nGIT DIFF:\n"
   
-  jq -n \
-    --arg prompt_prefix "$PROMPT_PREFIX" \
-    --arg diff_content "$DIFF_CONTENT" \
-    '{
-      "inputText": $prompt_prefix + $diff_content,
-      "enableTrace": true
-    }' > "$TMP_JSON"
+  # Use a temporary file for the content first
+  TEMP_CONTENT_FILE=$(mktemp)
+  echo "${PROMPT_PREFIX}${DIFF_CONTENT}" > "$TEMP_CONTENT_FILE"
+  
+  # Create JSON payload using python to properly escape the JSON
+  python3 -c "import json; import sys; f = open('$TEMP_CONTENT_FILE', 'r'); content = f.read(); f.close(); payload = {'inputText': content, 'enableTrace': True}; f = open('$TMP_JSON', 'w'); json.dump(payload, f); f.close()"
+  
+  # Clean up temp file
+  rm -f "$TEMP_CONTENT_FILE"
   
   echo "[DEBUG] Agent Request JSON (truncated):"
   head -n 30 "$TMP_JSON"
   
   # Force UTF-8 encoding
-  iconv -f us-ascii -t utf-8 "$TMP_JSON" -o "$TMP_JSON.utf8" && mv "$TMP_JSON.utf8" "$TMP_JSON"
+  iconv -f us-ascii -t utf-8 "$TMP_JSON" -o "$TMP_JSON.utf8" 2>/dev/null && mv "$TMP_JSON.utf8" "$TMP_JSON" || true
   
   # Validate JSON
-  if ! jq . "$TMP_JSON" > /dev/null; then
+  if ! jq . "$TMP_JSON" > /dev/null 2>&1; then
     echo "[ERROR] Invalid JSON payload!"
-    exit 3
+    USE_AGENT=false
+  else
+    # Invoke Bedrock Agent
+    echo "[INFO] Invoking Bedrock Agent..."
+    
+    # First try with bedrock-agent-runtime (newer API)
+    if aws bedrock-agent-runtime invoke-agent \
+      --agent-id "$AGENT_ID" \
+      --agent-alias-id "$AGENT_ALIAS_ID" \
+      --session-id "$SESSION_ID" \
+      --body "file://$TMP_JSON" \
+      response.json 2>/dev/null; then
+      
+      echo "[INFO] Successfully invoked Bedrock Agent with bedrock-agent-runtime"
+      AGENT_SUCCESS=true
+    
+    # If that fails, try with bedrock-agent (older API)
+    elif aws bedrock-agent invoke-agent \
+      --agent-id "$AGENT_ID" \
+      --agent-alias-id "$AGENT_ALIAS_ID" \
+      --session-id "$SESSION_ID" \
+      --body "file://$TMP_JSON" \
+      response.json 2>/dev/null; then
+      
+      echo "[INFO] Successfully invoked Bedrock Agent with bedrock-agent"
+      AGENT_SUCCESS=true
+    
+    # If both fail, report error
+    else
+      echo "[ERROR] Bedrock Agent invocation failed! Falling back to direct model invocation."
+      # Fall back to direct model invocation
+      USE_AGENT=false
+      AGENT_SUCCESS=false
+    fi
+    
+    # If agent invocation was successful, process the response
+    if [[ "$USE_AGENT" == "true" && -f response.json ]]; then
+      # Calculate metrics for CloudWatch logging
+      END_TIME=$(date +%s.%N)
+      DURATION=$(echo "$END_TIME - $START_TIME" | bc 2>/dev/null || echo "unknown")
+      DIFF_SIZE=$(wc -c < "$DIFF_FILE" 2>/dev/null || echo "unknown")
+      
+      # Extract the completion from the agent response
+      echo "[DEBUG] Agent response received. Processing..."
+      
+      # Try different JSON paths that might contain the response
+      COMPLETION=$(jq -r '.completion // .finalResponse.text // .observation[0].finalResponse.text // empty' response.json 2>/dev/null)
+      
+      if [[ -n "$COMPLETION" && "$COMPLETION" != "null" ]]; then
+        # Write the completion to the output file
+        echo "$COMPLETION" > "$OUTPUT_FILE"
+        echo "[INFO] Successfully wrote documentation to $OUTPUT_FILE"
+        
+        # Log metrics for monitoring
+        echo "[METRICS] Execution time: ${DURATION}s | Diff size: ${DIFF_SIZE} bytes | Agent: $AGENT_ID"
+        exit 0
+      else
+        echo "[ERROR] No completion found in response"
+        cat response.json 2>/dev/null || echo "[ERROR] Cannot display response.json"
+        USE_AGENT=false  # Fall back to direct model invocation
+      fi
+    else
+      if [[ "$USE_AGENT" == "true" ]]; then
+        echo "[ERROR] Response file not found"
+      fi
+      USE_AGENT=false  # Fall back to direct model invocation
+    fi
   fi
+fi
+
+# If we get here, either agent invocation failed or was not requested
+# Fall back to direct model invocation
+if [[ "$USE_AGENT" == "false" ]]; then
+  echo "[INFO] Using direct model invocation with $MODEL_ID"
   
-  # Invoke Bedrock Agent
-  echo "[INFO] Invoking Bedrock Agent..."
-  if ! aws bedrock-agent-runtime invoke-agent \
-    --agent-id "$AGENT_ID" \
-    --agent-alias-id "$AGENT_ALIAS_ID" \
-    --session-id "$SESSION_ID" \
-    --body "file://$TMP_JSON" \
-    response.json; then
-    echo "[ERROR] Bedrock Agent invocation failed!"
-    cat response.json || true
-    exit 2
-  fi
-  
-  # Calculate metrics for CloudWatch logging
-  END_TIME=$(date +%s.%N)
-  DURATION=$(echo "$END_TIME - $START_TIME" | bc)
-  DIFF_SIZE=$(wc -c < "$DIFF_FILE")
-  
-  # Extract the completion from the agent response
-  echo "[DEBUG] Agent response received. Processing..."
-  DOC_TEXT=$(jq -r '.finalResponse.text // .completion // .observation[0].finalResponse.text // empty' response.json)
-  
-  # Log metrics for monitoring
-  echo "[METRICS] Execution time: ${DURATION}s | Diff size: ${DIFF_SIZE} bytes | Agent: $AGENT_ID"
-  
-else
   # Start timing for metrics (fallback method)
   START_TIME=$(date +%s.%N)
   
-  # Direct model invocation with Claude
   # Create an improved prompt for PR analysis
   PROMPT_PREFIX="You are a senior software engineer reviewing a GitHub Pull Request.\n\nPlease analyze this git diff and create a concise, well-formatted Markdown summary that:\n1. Describes what changed and why it matters\n2. Highlights any potential issues or improvements\n3. Organizes changes by component or feature\n\nGIT DIFF:\n"
-  ENHANCED_PROMPT="${PROMPT_PREFIX}${DIFF_CONTENT}"
   
-  jq -n \
-    --arg prompt "$ENHANCED_PROMPT" \
-    --argjson max_tokens "$MAX_TOKENS" \
-    '{
-       "anthropic_version": "bedrock-2023-05-31",
-       "max_tokens": $max_tokens,
-       "messages": [
-         {
-           "role": "user",
-           "content": [ { "type": "text", "text": $prompt } ]
-         }
-       ]
-     }' > "$TMP_JSON"
+  # Create a temporary file for the model payload
+  MODEL_PAYLOAD_FILE=$(mktemp)
+  trap 'rm -f "$MODEL_PAYLOAD_FILE" 2>/dev/null' EXIT
   
-  echo "[DEBUG] Model Request JSON (truncated):"
-  head -n 30 "$TMP_JSON"
+  # Create the payload for Anthropic Claude
+  # Escape the content properly for JSON
+  ESCAPED_CONTENT=$(python3 -c "import json; import sys; print(json.dumps('${PROMPT_PREFIX}${DIFF_CONTENT}')[1:-1])")
   
-  # Force UTF-8 encoding
-  iconv -f us-ascii -t utf-8 "$TMP_JSON" -o "$TMP_JSON.utf8" && mv "$TMP_JSON.utf8" "$TMP_JSON"
+  # Create the payload with proper JSON structure
+  cat > "$MODEL_PAYLOAD_FILE" << EOF
+{
+  "anthropic_version": "bedrock-2023-05-31",
+  "max_tokens": $MAX_TOKENS,
+  "messages": [
+    {
+      "role": "user",
+      "content": [
+        {
+          "type": "text",
+          "text": "$ESCAPED_CONTENT"
+        }
+      ]
+    }
+  ]
+}
+EOF
   
-  # Validate JSON
-  if ! jq . "$TMP_JSON" > /dev/null; then
-    echo "[ERROR] Invalid JSON payload!"
+  # Validate the JSON payload
+  if ! jq . "$MODEL_PAYLOAD_FILE" > /dev/null 2>&1; then
+    echo "[ERROR] Invalid JSON payload for model invocation!"
+    cat "$MODEL_PAYLOAD_FILE"
     exit 3
   fi
   
-  # Invoke Bedrock Model
-  echo "[INFO] Invoking Bedrock Claude model..."
-  if ! aws bedrock-runtime invoke-model \
+  # Log the payload for debugging
+  echo "[DEBUG] Model payload (first 100 chars):"
+  head -c 100 "$MODEL_PAYLOAD_FILE"
+  echo "..."
+  
+  # Invoke the Bedrock model directly
+  echo "[INFO] Invoking Bedrock model directly: $MODEL_ID"
+  if aws bedrock-runtime invoke-model \
     --model-id "$MODEL_ID" \
     --content-type "application/json" \
     --accept "application/json" \
-    --body "file://$TMP_JSON" \
-    response.json; then
-    echo "[ERROR] Bedrock model invocation failed!"
-    cat response.json || true
-    exit 2
+    --body "file://$MODEL_PAYLOAD_FILE" \
+    model-response.json; then
+    
+    # Calculate metrics
+    END_TIME=$(date +%s.%N)
+    DURATION=$(echo "$END_TIME - $START_TIME" | bc 2>/dev/null || echo "unknown")
+    DIFF_SIZE=$(wc -c < "$DIFF_FILE" 2>/dev/null || echo "unknown")
+    
+    # Extract the completion from the model response
+    if [[ -f model-response.json ]]; then
+      # For Claude models, the response format is different
+      if [[ "$MODEL_ID" == *"claude"* ]]; then
+        MODEL_RESPONSE=$(cat model-response.json | jq -r '.body' 2>/dev/null | jq -r '.content[0].text' 2>/dev/null)
+      else
+        # For other models, try a more generic approach
+        MODEL_RESPONSE=$(cat model-response.json | jq -r '.body' 2>/dev/null)
+      fi
+      
+      if [[ -n "$MODEL_RESPONSE" && "$MODEL_RESPONSE" != "null" ]]; then
+        echo "$MODEL_RESPONSE" > "$OUTPUT_FILE"
+        echo "[INFO] Successfully wrote documentation to $OUTPUT_FILE using direct model invocation"
+        echo "[METRICS] Execution time: ${DURATION}s | Diff size: ${DIFF_SIZE} bytes | Model: $MODEL_ID"
+        exit 0
+      else
+        echo "[ERROR] Could not extract response from model output"
+        cat model-response.json 2>/dev/null || echo "[ERROR] Cannot display model-response.json"
+        exit 3
+      fi
+    else
+      echo "[ERROR] Model response file not found"
+      exit 3
+    fi
+  else
+    echo "[ERROR] Direct model invocation failed"
+    exit 3
   fi
-  
-  # Calculate metrics for CloudWatch logging
-  END_TIME=$(date +%s.%N)
-  DURATION=$(echo "$END_TIME - $START_TIME" | bc)
-  DIFF_SIZE=$(wc -c < "$DIFF_FILE")
-  
-  # Extract the completion from the Claude model response
-  echo "[DEBUG] Model response received. Processing..."
-  DOC_TEXT=$(jq -r '.content[0].text // empty' response.json)
-  
-  # Log metrics for monitoring
-  echo "[METRICS] Execution time: ${DURATION}s | Diff size: ${DIFF_SIZE} bytes | Model: $MODEL_ID"
 fi
 
-if [[ -z "$DOC_TEXT" ]]; then
-  echo "[ERROR] No valid content in response!"
-  echo "[DEBUG] Full response:"
-  cat response.json
-  exit 3
-fi
-
-# --- Save Output ---
-echo "$DOC_TEXT" > "$OUTPUT_FILE"
-echo "[SUCCESS] Documentation saved to $OUTPUT_FILE"
-
+# If we get here, both agent and direct model invocation failed
+echo "[ERROR] All invocation methods failed"
+exit 5

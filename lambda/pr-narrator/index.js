@@ -7,26 +7,26 @@
  * 3. Return the audio URL for inclusion in PR comments
  * 
  * @author Rahul Ladumor
- * @version 1.0.0
+ * @version 2.0.0
  */
 
 'use strict';
 
-const AWS = require('aws-sdk');
+// Import AWS SDK v3 clients
+const { S3Client, PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
+const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
+const { BedrockRuntimeClient, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
+const { PollyClient, SynthesizeSpeechCommand } = require('@aws-sdk/client-polly');
 const https = require('https');
 
 // Initialize AWS clients with proper configuration
-const bedrock = new AWS.BedrockRuntime({
-  apiVersion: '2023-09-30',
-  maxRetries: 3,
-  httpOptions: {
-    timeout: 30000 // 30 seconds timeout for Bedrock calls
-  }
+const bedrockClient = new BedrockRuntimeClient({
+  maxAttempts: 3,
+  region: process.env.AWS_REGION || 'us-east-1'
 });
 
-const s3 = new AWS.S3({
-  apiVersion: '2006-03-01',
-  signatureVersion: 'v4'
+const s3Client = new S3Client({
+  region: process.env.AWS_REGION || 'us-east-1'
 });
 
 // Configuration from environment variables with fallbacks
@@ -245,7 +245,6 @@ async function fetchGitHubPRDetails(owner, repo, prNumber) {
 async function generateAudio(text) {
   try {
     logger.info('Generating audio with Bedrock Nova Sonic');
-    logger.debug('Text length:', text.length);
     
     // Prepare the request payload for Bedrock
     const payload = JSON.stringify({
@@ -255,12 +254,12 @@ async function generateAudio(text) {
     });
     
     // Invoke Bedrock model
-    const params = {
+    const command = new InvokeModelCommand({
       modelId: BEDROCK_MODEL_ID,
       contentType: 'application/json',
       accept: 'audio/mpeg',
-      body: payload
-    };
+      body: Buffer.from(payload)
+    });
     
     // In a production environment, this would be a real call to Bedrock
     // For demo purposes, we'll check if we're in a test environment
@@ -270,12 +269,12 @@ async function generateAudio(text) {
     }
     
     // Make the actual API call to Bedrock
-    const response = await bedrock.invokeModel(params).promise();
+    const response = await bedrockClient.send(command);
     
     // Extract the audio data from the response
     if (response.body) {
       logger.info('Successfully generated audio with Bedrock');
-      return response.body;
+      return Buffer.from(response.body);
     } else {
       throw new Error('Bedrock response did not contain audio data');
     }
@@ -296,25 +295,26 @@ async function generateAudioWithPolly(text) {
     logger.info('Falling back to Amazon Polly for audio generation');
     
     // Initialize Polly client
-    const polly = new AWS.Polly({
-      apiVersion: '2016-06-10'
+    const pollyClient = new PollyClient({
+      region: process.env.AWS_REGION || 'us-east-1'
     });
     
     // Prepare the request payload for Polly
-    const params = {
+    const command = new SynthesizeSpeechCommand({
       Engine: 'neural',
       OutputFormat: 'mp3',
       Text: text,
       VoiceId: 'Matthew' // Neural voice
-    };
+    });
     
     // Make the API call to Polly
-    const response = await polly.synthesizeSpeech(params).promise();
+    const response = await pollyClient.send(command);
     
     // Extract the audio data from the response
     if (response.AudioStream) {
       logger.info('Successfully generated audio with Polly');
-      return response.AudioStream;
+      // Convert the readable stream to a buffer
+      return await streamToBuffer(response.AudioStream);
     } else {
       throw new Error('Polly response did not contain audio data');
     }
@@ -322,6 +322,21 @@ async function generateAudioWithPolly(text) {
     logger.error('Error generating audio with Polly:', error);
     throw new Error(`Failed to generate audio with fallback: ${error.message}`);
   }
+}
+
+/**
+ * Helper function to convert a readable stream to a buffer
+ * 
+ * @param {ReadableStream} stream - The stream to convert
+ * @returns {Promise<Buffer>} The buffer containing the stream data
+ */
+async function streamToBuffer(stream) {
+  return new Promise((resolve, reject) => {
+    const chunks = [];
+    stream.on('data', (chunk) => chunks.push(chunk));
+    stream.on('error', reject);
+    stream.on('end', () => resolve(Buffer.concat(chunks)));
+  });
 }
 
 /**
@@ -349,23 +364,26 @@ async function uploadAudioToS3(audioData, prNumber, commitSha) {
     };
     
     // Upload to S3 with proper content type and metadata
-    const uploadParams = {
+    const putCommand = new PutObjectCommand({
       Bucket: BUCKET_NAME,
       Key: key,
       Body: audioData,
       ContentType: 'audio/mpeg',
       Metadata: metadata,
       CacheControl: 'max-age=86400' // 1 day cache
-    };
+    });
     
-    await s3.putObject(uploadParams).promise();
+    await s3Client.send(putCommand);
     logger.info('Successfully uploaded audio to S3');
     
     // Generate a pre-signed URL (valid for 7 days)
-    const url = s3.getSignedUrl('getObject', {
+    const getCommand = new GetObjectCommand({
       Bucket: BUCKET_NAME,
-      Key: key,
-      Expires: 604800 // 7 days in seconds
+      Key: key
+    });
+    
+    const url = await getSignedUrl(s3Client, getCommand, {
+      expiresIn: 604800 // 7 days in seconds
     });
     
     logger.info(`Generated pre-signed URL for audio: ${url}`);

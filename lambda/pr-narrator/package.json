@@ -1,6 +1,6 @@
 {
   "name": "pr-narrator",
-  "version": "1.0.0",
+  "version": "2.0.0",
   "description": "Lambda function to generate audio summaries of PR changes using AWS Bedrock",
   "main": "index.js",
   "scripts": {
@@ -19,7 +19,10 @@
   "author": "Rahul Ladumor",
   "license": "MIT",
   "dependencies": {
-    "aws-sdk": "^2.1483.0"
+    "@aws-sdk/client-s3": "^3.425.0",
+    "@aws-sdk/client-bedrock-runtime": "^3.425.0",
+    "@aws-sdk/client-polly": "^3.425.0",
+    "@aws-sdk/s3-request-presigner": "^3.425.0"
   },
   "devDependencies": {
     "chai": "^4.3.7",
