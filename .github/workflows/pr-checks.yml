@@ -274,9 +274,11 @@ jobs:
           AUDIO_URL=$(cat lambda-response.json | jq -r '.body.audio_url // "https://example.com/pr-summary.mp3"')
           SUMMARY=$(cat lambda-response.json | jq -r '.body.summary // "PR summary not available"')
           
-          # Use GitHub Actions output syntax for newer runners
+          # Store the summary in a file instead of using GitHub outputs
+          echo "$SUMMARY" > summary.txt
+          
+          # Only use GitHub Actions output for the audio URL
           echo "audio-url=$AUDIO_URL" >> $GITHUB_OUTPUT
-          echo "summary=$SUMMARY" >> $GITHUB_OUTPUT
       
       - name: Post PR Comment with Audio Summary
         if: steps.invoke-lambda.outputs.audio-url != ''
@@ -284,11 +286,14 @@ jobs:
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
+            const fs = require('fs');
             const audioUrl = process.env.AUDIO_URL;
-            const summary = process.env.SUMMARY;
+            
+            // Read summary directly from file
+            const summary = fs.readFileSync('summary.txt', 'utf8');
             
             console.log('Audio URL: ' + audioUrl);
-            console.log('Summary: ' + summary);
+            console.log('Summary length: ' + summary.length);
             
             let commentBody = '## 🎙️ PR Audio Summary\n\n';
             commentBody += summary;
@@ -303,5 +308,4 @@ jobs:
             });
         env:
           AUDIO_URL: ${{ steps.invoke-lambda.outputs.audio-url }}
-          SUMMARY: ${{ steps.invoke-lambda.outputs.summary }}
       
