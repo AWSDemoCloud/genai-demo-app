@@ -61,49 +61,53 @@ jobs:
             --index-id "${{ secrets.Q_INDEX_ID }}" \
             --data-source-id "${{ secrets.Q_DATA_SOURCE_ID }}" \
             --output json) || {
-              echo "Repository sync failed, continuing with alternative approach..."
-              echo "review-status=sync-failed" >> $GITHUB_OUTPUT
-            }
+                echo "Repository sync failed, continuing with alternative approach..."
+                echo "review-status=sync-failed" >> $GITHUB_OUTPUT
+              }
           
-          # Extract sync job ID and monitor status
+          # Extract sync job ID and monitor status with better error handling
           if [ -n "$SYNC_RESPONSE" ]; then
-            SYNC_JOB_ID=$(echo $SYNC_RESPONSE | jq -r '.jobId')
+            SYNC_JOB_ID=$(echo $SYNC_RESPONSE | jq -r '.jobId // .executionId // ""')
             echo "Sync job started with ID: $SYNC_JOB_ID"
             
-            # Wait for sync to complete with timeout and status monitoring
-            echo "Waiting for sync to complete..."
-            MAX_RETRIES=12
-            RETRY_COUNT=0
-            
-            while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
-              SYNC_STATUS=$(aws qbusiness list-data-source-sync-jobs \
-                --application-id "${{ secrets.Q_APP_ID }}" \
-                --index-id "${{ secrets.Q_INDEX_ID }}" \
-                --data-source-id "${{ secrets.Q_DATA_SOURCE_ID }}" \
-                --query "dataSourceSyncJobs[?jobId=='$SYNC_JOB_ID'].status" \
-                --output text) || break
+            if [ -n "$SYNC_JOB_ID" ]; then
+              # Wait for sync to complete with timeout and status monitoring
+              echo "Waiting for sync to complete..."
+              MAX_RETRIES=12
+              RETRY_COUNT=0
               
-              echo "Sync status: $SYNC_STATUS (attempt $RETRY_COUNT of $MAX_RETRIES)"
-              
-              if [ "$SYNC_STATUS" = "SUCCEEDED" ]; then
-                echo "Sync completed successfully"
-                break
-              elif [[ "$SYNC_STATUS" = "FAILED" || "$SYNC_STATUS" = "ABORTED" ]]; then
-                echo "Sync failed with status: $SYNC_STATUS"
-                break
-              fi
-              
-              RETRY_COUNT=$((RETRY_COUNT+1))
-              sleep 10
-            done
+              while [ $RETRY_COUNT -lt $MAX_RETRIES ]; do
+                SYNC_STATUS=$(aws qbusiness list-data-source-sync-jobs \
+                  --application-id "${{ secrets.Q_APP_ID }}" \
+                  --index-id "${{ secrets.Q_INDEX_ID }}" \
+                  --data-source-id "${{ secrets.Q_DATA_SOURCE_ID }}" \
+                  --query "dataSourceSyncJobs[?jobId=='$SYNC_JOB_ID'].status || history[?executionId=='$SYNC_JOB_ID'].status" \
+                  --output text) || break
+                
+                echo "Sync status: $SYNC_STATUS (attempt $RETRY_COUNT of $MAX_RETRIES)"
+                
+                if [ "$SYNC_STATUS" = "SUCCEEDED" ]; then
+                  echo "Sync completed successfully"
+                  break
+                elif [[ "$SYNC_STATUS" = "FAILED" || "$SYNC_STATUS" = "ABORTED" ]]; then
+                  echo "Sync failed with status: $SYNC_STATUS"
+                  break
+                fi
+                
+                RETRY_COUNT=$((RETRY_COUNT+1))
+                sleep 10
+              done
+            else
+              echo "Warning: Could not extract job ID from response, skipping sync status check"
+            fi
           fi
           
-          # Run security scan using Amazon Q Business
+          # Run security scan using Amazon Q Business with correct command
           echo "Running code security scan..."
           aws qbusiness chat-sync \
             --application-id "${{ secrets.Q_APP_ID }}" \
             --user-id "${{ secrets.Q_USER_ID }}" \
-            --text "Scan the repository for security vulnerabilities and provide a detailed JSON report" \
+            --user-message "Scan the repository for security vulnerabilities and provide a detailed JSON report" \
             --output json > q-review-raw.json || {
               echo "Amazon Q Business scan failed, using fallback"
               echo "review-status=scan-failed" >> $GITHUB_OUTPUT
