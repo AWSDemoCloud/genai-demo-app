@@ -37,9 +37,20 @@ jobs:
       
       - name: Create diff for Amazon Q
         run: |
-          git fetch origin ${{ github.base_ref }}:${{ github.base_ref }}
-          git diff --text --diff-filter=d ${{ github.base_ref }}...HEAD > q-diff.txt
-          echo "Diff size: $(stat -c%s q-diff.txt || wc -c < q-diff.txt) bytes"
+          # Safely fetch and create diff using GitHub's context variables
+          # Use explicit path for output to prevent path traversal
+          BASE_REF="${{ github.base_ref }}"
+          
+          # Validate input before using it in commands
+          if [[ ! "$BASE_REF" =~ ^[a-zA-Z0-9_\-\.\+\/]+$ ]]; then
+            echo "Error: Invalid base_ref format"
+            exit 1
+          fi
+          
+          # Proceed with validated input
+          git fetch origin "$BASE_REF:$BASE_REF"
+          git diff --text --diff-filter=d "$BASE_REF...HEAD" > "./q-diff.txt"
+          echo "Diff size: $(stat -c%s ./q-diff.txt || wc -c < ./q-diff.txt) bytes"
       
       - name: Run Amazon Q Code Review
         id: q-review
