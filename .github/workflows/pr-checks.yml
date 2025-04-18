@@ -100,14 +100,14 @@ jobs:
           
           # Run security scan using Amazon Q Business
           echo "Running code security scan..."
-          aws qbusiness query \
+          aws qbusiness chat-sync \
             --application-id "${{ secrets.Q_APP_ID }}" \
             --user-id "${{ secrets.Q_USER_ID }}" \
-            --input-text "Scan the repository for security vulnerabilities and provide a detailed JSON report" \
+            --text "Scan the repository for security vulnerabilities and provide a detailed JSON report" \
             --output json > q-review-raw.json || {
               echo "Amazon Q Business scan failed, using fallback"
               echo "review-status=scan-failed" >> $GITHUB_OUTPUT
-            }        
+            }
       
       - name: Process Amazon Q Findings
         run: |
