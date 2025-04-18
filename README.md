@@ -554,254 +554,256 @@ With the steps above you can **clone → deploy → PR** and watch:
 
 ---
 
-## 🙌 For AWS User Group Attendees
-- This project merges advanced AWS and GenAI features into a single, cohesive demonstration.
-- Feel free to fork, adapt, or extend for your own learning or presentations.
-- For questions, reach out to [Rahul Ladumor](https://www.linkedin.com/in/rahulladumor/).
+## 📄 License
+This project is [MIT licensed](LICENSE).
 
 ---
 
-## 💡 Final Tips
-- **Guardrails:** Enable PII detection, content moderation, or custom blocklists for your Bedrock doc-agent.
-- **Cost Controls:** Add a monthly budget in AWS Budgets, or set up Cost Anomaly Detection for your `genai-demo-app` resources.
-- **Security:** Don’t store real secrets in plain text. Use AWS Secrets Manager or GitHub encrypted secrets.
-- **Fallback:** Always have a recorded run (screenshots, or a short Loom video) in case the live environment fails during your talk.
+## 🛠️ How It Works: Detailed System Explanation
 
----
+This section provides a comprehensive explanation of how each component in the GenAI PR Enhancement Pipeline works and interacts with other parts of the system.
 
-## 🤝 Contributing
-Contributions, issues, and feature requests are welcome! Feel free to check the [issues page](../../issues) or submit a pull request.
+### 1. System Components Overview
 
-## 🎭 Demo Scenarios
+The pipeline consists of these key components:
 
-Here are three comprehensive demo scenarios to showcase during your AWS session:
+| Component | Type | Purpose |
+|-----------|------|---------|
+| GitHub Actions Workflow | Orchestration | Coordinates the entire process when PRs are created/updated |
+| Amazon Q Developer | Code Analysis | Automatically reviews code for quality and security issues |
+| Bedrock Claude 3 Sonnet | AI Model | Generates PR documentation by analyzing code changes |
+| PR-Narrator Lambda | Serverless Function | Creates and posts audio summaries of PRs |
+| Bedrock Nova Sonic | Text-to-Speech | Converts PR summaries to natural-sounding audio |
+| S3 Bucket | Storage | Stores generated audio files |
 
-### Demo 1: Code Quality Enhancement with Amazon Q Developer
+### 2. Workflow Sequence
 
-This scenario demonstrates how Amazon Q Developer automatically identifies code issues and security vulnerabilities in your PR.
+Here's the exact sequence of events that occurs when a PR is created or updated:
 
-**Steps:**
-1. Create a new feature branch: `git checkout -b demo/security-vulnerability`
-2. Introduce a deliberate security vulnerability:
-   ```bash
-   echo 'const userQuery = `SELECT * FROM users WHERE id = ${req.params.id}`;' >> app/database.js
-   echo 'const secrets = {"api_key": "sk_test_51M7qPQLgMc5TcEi8RWvVoHlxU"}' >> app/config.js
-   ```
-3. Commit and create a pull request:
-   ```bash
-   git add .
-   git commit -m "Add user query functionality with direct parameters"
-   git push origin HEAD
-   gh pr create -t "Add user query feature" -b "This PR implements a user query feature."
-   ```
+#### 2.1 PR Creation Triggers
 
-**What to Observe:**
-- Amazon Q Developer will identify the SQL injection vulnerability in the code
-- It will also flag the hardcoded API key as a security risk
-- The PR check will automatically fail with detailed security findings
-- A comprehensive code review will appear in GitHub with suggested fixes
+When a developer creates or updates a PR in GitHub, three parallel processes are initiated:
 
-### Demo 2: Automated PR Documentation with Bedrock
+1. **GitHub Actions Workflow** is triggered by the PR event
+2. **Amazon Q Developer** receives a webhook notification
+3. **PR-Narrator Lambda** can optionally be triggered directly via webhook
 
-This scenario showcases how Claude 3 Sonnet on Bedrock automatically generates comprehensive PR documentation.
+#### 2.2 Amazon Q Developer Process
 
-**Steps:**
-1. Create a new feature branch: `git checkout -b demo/feature-implementation`
-2. Add a substantial feature with clear purpose:
-   ```bash
-   # Create a new feature file
-   mkdir -p app/features
-   cat > app/features/dataProcessor.js << 'EOF'
-   /**
-    * Data Processor Module
-    * Handles transformation and validation of incoming data
-    */
-   
-   // Configuration for data processing
-   const CONFIG = {
-     maxBatchSize: 1000,
-     processingModes: ['sync', 'async', 'batch'],
-     validationRules: {
-       required: ['id', 'timestamp', 'source'],
-       numeric: ['amount', 'quantity'],
-       dateFormat: ['createdAt', 'updatedAt']
-     }
-   };
-   
-   /**
-    * Validates incoming data against schema
-    * @param {Object} data - The data object to validate
-    * @returns {Object} Validation result with errors if any
-    */
-   function validateData(data) {
-     const errors = [];
-     const { required, numeric, dateFormat } = CONFIG.validationRules;
-     
-     // Check required fields
-     for (const field of required) {
-       if (!data[field]) {
-         errors.push(`Missing required field: ${field}`);
-       }
-     }
-     
-     // Check numeric fields
-     for (const field of numeric) {
-       if (data[field] && isNaN(Number(data[field]))) {
-         errors.push(`Field ${field} must be numeric`);
-       }
-     }
-     
-     // Check date format fields
-     for (const field of dateFormat) {
-       if (data[field] && isNaN(Date.parse(data[field]))) {
-         errors.push(`Field ${field} must be a valid date`);
-       }
-     }
-     
-     return {
-       valid: errors.length === 0,
-       errors
-     };
-   }
-   
-   /**
-    * Transforms data according to specified processing mode
-    * @param {Object} data - The data to transform
-    * @param {String} mode - Processing mode (sync|async|batch)
-    * @returns {Object} Transformed data
-    */
-   function transformData(data, mode = 'sync') {
-     if (!CONFIG.processingModes.includes(mode)) {
-       throw new Error(`Invalid processing mode: ${mode}`);
-     }
-     
-     const result = { ...data };
-     
-     // Add metadata based on processing mode
-     result.metadata = {
-       processedAt: new Date().toISOString(),
-       mode,
-       version: '1.0.0'
-     };
-     
-     // Apply transformations based on mode
-     if (mode === 'batch') {
-       result.batchId = `batch_${Date.now()}`;
-     } else if (mode === 'async') {
-       result.callbackUrl = data.callbackUrl || 'https://api.example.com/callbacks';
-     }
-     
-     return result;
-   }
-   
-   /**
-    * Process data in batches
-    * @param {Array} dataArray - Array of data objects to process
-    * @returns {Object} Processing results with stats
-    */
-   function processBatch(dataArray) {
-     if (!Array.isArray(dataArray)) {
-       throw new Error('Input must be an array');
-     }
-     
-     if (dataArray.length > CONFIG.maxBatchSize) {
-       throw new Error(`Batch size exceeds maximum (${CONFIG.maxBatchSize})`);
-     }
-     
-     const results = {
-       processed: 0,
-       failed: 0,
-       items: []
-     };
-     
-     for (const item of dataArray) {
-       const validation = validateData(item);
-       
-       if (validation.valid) {
-         const transformed = transformData(item, 'batch');
-         results.items.push({
-           id: item.id,
-           status: 'processed',
-           result: transformed
-         });
-         results.processed++;
-       } else {
-         results.items.push({
-           id: item.id || 'unknown',
-           status: 'failed',
-           errors: validation.errors
-         });
-         results.failed++;
-       }
-     }
-     
-     return results;
-   }
-   
-   module.exports = {
-     validateData,
-     transformData,
-     processBatch,
-     CONFIG
-   };
-   EOF
-   ```
-3. Commit and create a pull request:
-   ```bash
-   git add .
-   git commit -m "Add data processor module with validation and transformation"
-   git push origin HEAD
-   gh pr create -t "Data processor implementation" -b "This PR implements a comprehensive data processing module with validation and transformation capabilities."
-   ```
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│                 │     │                 │     │                 │
+│  GitHub         │────▶│  Amazon Q       │────▶│  Code Analysis  │
+│  PR Event       │     │  Developer      │     │  & Review       │
+│                 │     │                 │     │                 │
+└─────────────────┘     └─────────────────┘     └────────┬────────┘
+                                                         │
+                                                         ▼
+                                                ┌─────────────────┐
+                                                │                 │
+                                                │  GitHub PR      │
+                                                │  Check Results  │
+                                                │                 │
+                                                └─────────────────┘
+```
 
-**What to Observe:**
-- The `bedrock-docs` job in the GitHub Action will process your PR
-- Claude will analyze the code changes and automatically generate the `doc.md` file
-- The generated documentation will include:
-  - Overview of the new feature
-  - Architecture and design decisions
-  - Key functionality and code organization
-  - Usage examples
-- The docs will be committed back to your PR branch automatically
+**How Amazon Q Developer Works:**
 
-### Demo 3: PR Narrator Lambda with Audio Summary
+1. **Setup**: Amazon Q Developer is connected to your GitHub repository through the AWS Console
+2. **Triggering**: When a PR is created/updated, GitHub sends a webhook to Amazon Q
+3. **Analysis**: Amazon Q Developer:
+   - Pulls the code changes from the PR
+   - Analyzes code for security vulnerabilities, quality issues, and best practices
+   - Uses AI to identify potential problems
+4. **Results**: Amazon Q Developer posts its findings:
+   - As a "check" in the GitHub PR's "Checks" tab
+   - As inline comments on specific lines of code with issues
+   - With severity levels and suggested fixes
 
-This demo showcases how the AWS Lambda function generates an audio summary of your PR using Bedrock's text-to-speech capabilities.
+**Key Point**: Amazon Q Developer operates independently from your GitHub Actions workflow. It's a separate service that integrates directly with GitHub.
 
-**Steps:**
-1. Ensure your previous PR was created successfully
-2. The PR-Narrator Lambda will be triggered automatically
-3. Check the PR comments section for the audio summary link
+#### 2.3 Documentation Generation Process
 
-**What to Observe:**
-- The Lambda function receives PR details and generates a text summary
-- It then converts this summary to audio using Bedrock's Nova Sonic model
-- The audio file is stored in the S3 bucket created during deployment
-- A comment is posted to your PR with a link to the audio summary
-- When clicked, users can listen to a concise, professionally narrated overview of your PR
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│                 │     │                 │     │                 │
+│  GitHub         │────▶│  GitHub Actions │────▶│  Checkout Code  │
+│  PR Event       │     │  Workflow       │     │  & Generate Diff│
+│                 │     │                 │     │                 │
+└─────────────────┘     └─────────────────┘     └────────┬────────┘
+                                                         │
+                                                         ▼
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│                 │     │                 │     │                 │
+│  Commit Doc     │◀────│  Process        │◀────│  Invoke Bedrock │
+│  to PR Branch   │     │  Response       │     │  Claude Model   │
+│                 │     │                 │     │                 │
+└─────────────────┘     └─────────────────┘     └─────────────────┘
+```
 
-## 🔄 Typical End-to-End Demo Flow
+**How Documentation Generation Works:**
 
-For a comprehensive demo during your AWS session, follow this sequence:
+1. **Diff Creation**: The GitHub Actions workflow:
+   - Checks out the PR code
+   - Generates a diff of the changes using Git commands
+   - Sanitizes the diff for processing
 
-1. **Setup & Overview** (5 minutes)
-   - Walk through the architecture diagram and explain the components
-   - Show the GitHub Action workflow configuration
-   - Highlight the integration points between GitHub, AWS Lambda, and Bedrock
+2. **Bedrock Invocation**: The workflow calls Bedrock Claude using `invoke-bedrock-agent-simple.sh`:
+   - Creates a JSON payload with the diff and a documentation prompt
+   - Invokes the Claude 3 Sonnet model via AWS CLI
+   - Processes the response to extract the generated documentation
 
-2. **Live Demo** (15 minutes)
-   - Execute Demo 1: Security vulnerability detection with Amazon Q Developer
-   - Execute Demo 2: Automated documentation with Bedrock Claude
-   - Execute Demo 3: Audio narration with PR-Narrator Lambda
+3. **Documentation Commit**: The workflow:
+   - Saves the generated documentation as `doc.md`
+   - Commits this file back to the PR branch
+   - This appears as a new commit in the PR
 
-3. **Behind the Scenes** (10 minutes)
-   - Show the Lambda function code and explain how it works
-   - Examine the Bedrock invocation scripts
-   - Discuss the architecture decisions and potential extensions
+**Technical Details:**
+- The Bedrock invocation uses the model ID: `anthropic.claude-3-sonnet-20240229-v1:0`
+- The script uses `jq` for proper JSON escaping
+- The prompt specifically asks for Markdown-formatted documentation
 
-4. **Q&A and Discussion** (5-10 minutes)
+#### 2.4 Audio Summary Generation Process
 
-This structured approach ensures a compelling demonstration that showcases the power of AWS generative AI services in a real-world development workflow.
+```
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│                 │     │                 │     │                 │
+│  GitHub Actions │────▶│  Invoke Lambda  │────▶│  PR-Narrator    │
+│  Workflow       │     │  Function       │     │  Lambda         │
+│                 │     │                 │     │                 │
+└─────────────────┘     └─────────────────┘     └────────┬────────┘
+                                                         │
+                                                         ▼
+┌─────────────────┐     ┌─────────────────┐     ┌─────────────────┐
+│                 │     │                 │     │                 │
+│  Post Comment   │◀────│  Process        │◀────│  Generate Audio │
+│  with Audio Link│     │  Lambda Response│     │  with Bedrock   │
+│                 │     │                 │     │                 │
+└─────────────────┘     └─────────────────┘     └────────┬────────┘
+                                                         │
+                                                         ▼
+                                                ┌─────────────────┐
+                                                │                 │
+                                                │  Store Audio    │
+                                                │  in S3 Bucket   │
+                                                │                 │
+                                                └─────────────────┘
+```
+
+**How Audio Summary Generation Works:**
+
+1. **Lambda Invocation**: The GitHub Actions workflow:
+   - Creates a JSON payload with PR details (PR number, repository, commit SHA)
+   - Invokes the PR-Narrator Lambda function using AWS CLI
+   - Waits for the Lambda response
+
+2. **PR-Narrator Lambda Processing**:
+   - Receives the PR details from the workflow
+   - Fetches additional PR information from GitHub API if needed
+   - Generates a concise summary of the PR changes
+   - Formats the summary with SSML tags for better speech quality
+   - Invokes Bedrock Nova Sonic for text-to-speech conversion
+   - Stores the audio file in an S3 bucket
+   - Creates a pre-signed URL for the audio file
+   - Returns the summary text and audio URL to the workflow
+
+3. **Comment Creation**: The GitHub Actions workflow:
+   - Receives the Lambda response with summary and audio URL
+   - Creates a comment on the PR with:
+     - The text summary
+     - A link to the audio file
+     - Formatting and emojis for better presentation
+
+**Technical Details:**
+- The Lambda function uses Node.js with AWS SDK v3
+- SSML formatting enhances audio quality with:
+  - Dynamic speech rates and pitch for different content types
+  - Appropriate pauses between sections
+  - Proper pronunciation of technical terms
+- The audio is generated with high-quality settings:
+  - 24kHz sample rate
+  - 320kbps bit rate for studio-quality output
+
+### 3. Key Files and Their Functions
+
+| File | Purpose | Key Functionality |
+|------|---------|-------------------|
+| `.github/workflows/pr-checks.yml` | Main workflow definition | Orchestrates the entire process |
+| `scripts/invoke-bedrock-agent-simple.sh` | Bedrock invocation | Calls Claude 3 Sonnet for documentation |
+| `lambda/pr-narrator/index.js` | Lambda function code | Generates and posts audio summaries |
+| `infra/template.yaml` | SAM template | Defines AWS resources (Lambda, S3, etc.) |
+
+#### 3.1 GitHub Actions Workflow File
+
+The workflow file (`.github/workflows/pr-checks.yml`) defines three main jobs:
+
+1. **amazon-q-review**: Simulates Amazon Q Developer review (in a real setup, this happens independently)
+2. **bedrock-docs**: Generates documentation using Bedrock Claude
+3. **pr-narrator**: Invokes Lambda for audio summary generation
+
+#### 3.2 Bedrock Invocation Script
+
+The `invoke-bedrock-agent-simple.sh` script:
+- Takes a diff file as input
+- Sanitizes the content for processing
+- Creates a properly formatted JSON payload
+- Invokes Bedrock Claude via AWS CLI
+- Extracts and returns the generated documentation
+
+#### 3.3 PR-Narrator Lambda
+
+The Lambda function (`lambda/pr-narrator/index.js`):
+- Handles the PR details from GitHub Actions
+- Generates a summary using structured formatting
+- Applies SSML enhancements for better speech quality
+- Calls Bedrock Nova Sonic for text-to-speech
+- Manages S3 storage and URL generation
+- Includes fallback mechanisms for reliability
+
+### 4. Authentication and Permissions
+
+The system uses these authentication mechanisms:
+
+1. **GitHub to AWS**: GitHub Actions uses OIDC (OpenID Connect) to assume an AWS IAM role
+2. **AWS Service Access**: IAM roles provide access to:
+   - Bedrock for model invocation
+   - Lambda for function execution
+   - S3 for storage operations
+3. **GitHub API Access**: GitHub token for PR comment creation and repository interactions
+
+### 5. Error Handling and Reliability
+
+The pipeline includes several reliability features:
+
+1. **Fallback Mechanisms**:
+   - Lambda can fall back to Amazon Polly if Bedrock TTS fails
+   - Documentation generation has retry logic
+
+2. **Robust Output Handling**:
+   - Uses temporary files for complex text content
+   - Properly handles special characters and formatting
+
+3. **Logging and Monitoring**:
+   - Comprehensive logging in Lambda function
+   - GitHub Actions workflow logs for troubleshooting
+
+### 6. Cost Optimization
+
+The system is designed to be cost-effective:
+
+1. **Serverless Architecture**:
+   - Lambda only runs when needed
+   - No ongoing infrastructure costs
+
+2. **Efficient Resource Usage**:
+   - Controls token usage in Bedrock calls
+   - Optimizes audio generation parameters
+
+3. **S3 Lifecycle Management**:
+   - Can be configured to expire old audio files
+   - Minimizes storage costs
+
+This detailed explanation should help newcomers understand exactly how the GenAI PR Enhancement Pipeline works, from the initial PR creation to the final audio summary generation.
 
 ## 📄 License
 This project is [MIT licensed](LICENSE).
