@@ -110,24 +110,12 @@ jobs:
           # 1. For GitHub Actions, use OIDC to authenticate with AWS and then use Amazon Q
           # 2. Use the AWS CLI with appropriate IAM roles to run code scans
           
-          # Check if the review was successful
+          # Since we're using a simulated review, we can skip the jq processing
+          # and just copy the raw output to the expected location
           if [ -s q-review-raw.json ]; then
             echo "Amazon Q review completed successfully"
-            # Process the raw output into our expected format
-            jq '{
-              findings: .findings | map({
-                id: .id,
-                title: .title,
-                description: .description,
-                severity: .severity,
-                filePath: .location.filePath,
-                startLine: .location.startLine,
-                endLine: .location.endLine,
-                recommendation: .recommendation
-              }),
-              summary: (.findings | length | tostring) + " findings detected"
-            }' q-review-raw.json > q-review.json
-            
+            # Simply copy the file since it's already in the right format
+            cp q-review-raw.json q-review.json
             echo "review-status=completed" >> $GITHUB_OUTPUT
           else
             echo "Amazon Q review failed, using fallback"
