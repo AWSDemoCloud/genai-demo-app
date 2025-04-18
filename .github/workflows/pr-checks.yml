@@ -41,23 +41,50 @@ jobs:
           git diff --text --diff-filter=d ${{ github.base_ref }}...HEAD > q-diff.txt
           echo "Diff size: $(stat -c%s q-diff.txt || wc -c < q-diff.txt) bytes"
       
-      - name: Run Amazon Q Code Review
+      - name: Run Amazon Q Review
         id: q-review
+        env:
+          AWS_REGION: ${{ secrets.AWS_REGION }}
+          AWS_ROLE_TO_ASSUME: ${{ secrets.AWS_ROLE_ARN }}
         run: |
-          # Set up Amazon Q CLI (if needed)
-          # aws q-dev-agent install || true
+          # Generate diff file for Amazon Q to analyze
+          git diff --name-only ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} > changed_files.txt
+          git diff ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} > q-diff.txt
           
-          # Run code review
+          # Install Amazon Q CLI extension
+          echo "Installing Amazon Q Developer CLI..."
+          pip install amazon-q-developer-cli
+          
+          # Configure AWS credentials
+          echo "Configuring AWS credentials..."
+          aws configure set aws_access_key_id ${{ secrets.AWS_ACCESS_KEY_ID }}
+          aws configure set aws_secret_access_key ${{ secrets.AWS_SECRET_ACCESS_KEY }}
+          aws configure set region ${{ env.AWS_REGION }}
+          
+          # Run Amazon Q code review
           echo "Running Amazon Q code review..."
-          # aws q-dev-agent review --diff-file q-diff.txt --output-file q-review.json
+          amazon-q-cli review \
+            --diff-file q-diff.txt \
+            --output-format json \
+            --output-file q-review.json \
+            --severity-level low \
+            --check-best-practices \
+            --check-security-issues \
+            --check-code-quality
           
-          # For demo, simulate the review output
-          echo '{"summary":"Code changes look good overall. Added proper text handling for git diff and binary file detection.","issues":[{"severity":"info","message":"Consider adding more detailed comments for the binary check logic."}],"suggestions":[{"file":".github/workflows/pr-checks.yml","line":78,"message":"Add a comment explaining why binary files are problematic for diff analysis."}]}' > q-review.json
-          
-          echo "review-status=completed" >> $GITHUB_OUTPUT
+          # Check if review was successful
+          if [ -f "q-review.json" ]; then
+            echo "Amazon Q review completed successfully"
+            echo "review-status=completed" >> $GITHUB_OUTPUT
+          else
+            echo "Amazon Q review failed, using fallback"
+            # Fallback to basic review if Amazon Q fails
+            echo '{"summary":"Basic code review completed. Unable to run full Amazon Q analysis.","issues":[{"severity":"info","message":"Amazon Q review failed to complete. Please check AWS credentials and permissions."}],"suggestions":[]}' > q-review.json
+            echo "review-status=fallback" >> $GITHUB_OUTPUT
+          fi
       
       - name: Post Amazon Q Review as Check
-        if: steps.q-review.outputs.review-status == 'completed'
+        if: steps.q-review.outputs.review-status == 'completed' || steps.q-review.outputs.review-status == 'fallback'
         uses: actions/github-script@v6
         with:
           github-token: ${{ secrets.GITHUB_TOKEN }}
@@ -67,21 +94,79 @@ jobs:
             
             // Determine check conclusion based on issues
             const hasCritical = review.issues && review.issues.some(i => i.severity === 'critical');
-            const conclusion = hasCritical ? 'failure' : 'success';
+            const hasHigh = review.issues && review.issues.some(i => i.severity === 'high');
+            
+            // Set conclusion based on severity
+            let conclusion = 'success';
+            if (hasCritical) {
+              conclusion = 'failure';
+            } else if (hasHigh) {
+              conclusion = 'neutral';
+            }
+            
+            // Check if this was a fallback review
+            const isFallback = '${{ steps.q-review.outputs.review-status }}' === 'fallback';
             
             // Create check output
             const output = {
               title: 'Amazon Q Code Review',
               summary: review.summary || 'Code review completed',
-              text: '### Issues\n' + 
-                (review.issues && review.issues.length > 0 
-                  ? review.issues.map(i => `- **${i.severity}**: ${i.message}`).join('\n')
-                  : 'No issues found') + 
-                '\n\n### Suggestions\n' +
-                (review.suggestions && review.suggestions.length > 0
-                  ? review.suggestions.map(s => `- **${s.file}:${s.line}**: ${s.message}`).join('\n')
-                  : 'No suggestions')
+              text: isFallback 
+                ? '⚠️ **Note**: Using fallback review mode. Full Amazon Q analysis was not available.\n\n'
+                : '✅ **Amazon Q Developer** performed a comprehensive code review.\n\n'
             };
+            
+            // Add issues section
+            output.text += '### Issues\n';
+            if (review.issues && review.issues.length > 0) {
+              // Group issues by severity
+              const severityOrder = ['critical', 'high', 'medium', 'low', 'info'];
+              const issuesBySeverity = {};
+              
+              review.issues.forEach(issue => {
+                const severity = issue.severity || 'info';
+                if (!issuesBySeverity[severity]) {
+                  issuesBySeverity[severity] = [];
+                }
+                issuesBySeverity[severity].push(issue);
+              });
+              
+              // Add issues in order of severity
+              severityOrder.forEach(severity => {
+                if (issuesBySeverity[severity] && issuesBySeverity[severity].length > 0) {
+                  output.text += `\n#### ${severity.toUpperCase()} Severity Issues\n`;
+                  issuesBySeverity[severity].forEach(issue => {
+                    output.text += `- ${issue.message}\n`;
+                    if (issue.location) {
+                      output.text += `  - Location: ${issue.location}\n`;
+                    }
+                  });
+                }
+              });
+            } else {
+              output.text += 'No issues found\n';
+            }
+            
+            // Add suggestions section
+            output.text += '\n### Suggestions\n';
+            if (review.suggestions && review.suggestions.length > 0) {
+              review.suggestions.forEach(s => {
+                output.text += `- **${s.file}:${s.line}**: ${s.message}\n`;
+              });
+            } else {
+              output.text += 'No suggestions\n';
+            }
+            
+            // Add security section if available
+            if (review.securityIssues && review.securityIssues.length > 0) {
+              output.text += '\n### Security Issues\n';
+              review.securityIssues.forEach(issue => {
+                output.text += `- **${issue.severity}**: ${issue.description}\n`;
+                if (issue.remediation) {
+                  output.text += `  - Remediation: ${issue.remediation}\n`;
+                }
+              });
+            }
             
             // Post check
             await github.rest.checks.create({
@@ -93,6 +178,17 @@ jobs:
               conclusion: conclusion,
               output: output
             });
+            
+            // Also post a PR comment with the review summary
+            if (review.issues && review.issues.some(i => i.severity === 'critical' || i.severity === 'high')) {
+              const comment = {
+                owner: context.repo.owner,
+                repo: context.repo.repo,
+                issue_number: context.payload.pull_request.number,
+                body: `## Amazon Q Code Review Results\n\n${review.summary}\n\n${output.text}`
+              };
+              await github.rest.issues.createComment(comment);
+            }
 
 # ──────────────────────────────────────────────────────────────
   build-and-test:
