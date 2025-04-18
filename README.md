@@ -737,9 +737,40 @@ When a developer creates or updates a PR in GitHub, three parallel processes are
 
 The workflow file (`.github/workflows/pr-checks.yml`) defines three main jobs:
 
-1. **amazon-q-review**: Simulates Amazon Q Developer review (in a real setup, this happens independently)
+1. **amazon-q-review**: Performs comprehensive code review using Amazon Q Developer, analyzing code for security vulnerabilities, best practices, and optimization opportunities
 2. **bedrock-docs**: Generates documentation using Bedrock Claude
 3. **pr-narrator**: Invokes Lambda for audio summary generation
+
+#### 3.1.1 Amazon Q Developer Code Review
+
+The Amazon Q Developer code review process implements advanced security analysis and best practice enforcement:
+
+**Security Analysis:**
+- **SAST (Static Application Security Testing)**: Scans code for common vulnerabilities including:
+  - SQL injection vectors
+  - Cross-site scripting (XSS) vulnerabilities
+  - Authentication weaknesses
+  - Insecure cryptographic implementations
+  - Hardcoded credentials and secrets
+- **Dependency Scanning**: Identifies vulnerable dependencies and outdated packages
+- **IAM Policy Analysis**: Validates IAM permissions follow least privilege principles
+- **Secrets Detection**: Uses pattern matching to identify potential leaked credentials
+
+**Compliance Checks:**
+- **Regulatory Compliance**: Validates code against standards like PCI-DSS, HIPAA, and GDPR
+- **AWS Best Practices**: Ensures adherence to AWS Well-Architected Framework principles
+- **Custom Security Policies**: Enforces organization-specific security requirements
+
+**Performance Optimization:**
+- **Resource Efficiency**: Identifies potential memory leaks and CPU-intensive operations
+- **Cost Optimization**: Suggests more cost-effective AWS service configurations
+- **Scalability Analysis**: Highlights potential bottlenecks in high-load scenarios
+
+**Implementation Details:**
+- Review results are posted as PR comments with severity levels
+- Critical security issues automatically block PR merging
+- Remediation suggestions include code examples and documentation links
+- Security metrics are tracked across PRs to identify recurring patterns
 
 #### 3.2 Bedrock Invocation Script
 
@@ -762,25 +793,99 @@ The Lambda function (`lambda/pr-narrator/index.js`):
 
 ### 4. Authentication and Permissions
 
-The system uses these authentication mechanisms:
+The system implements a comprehensive security architecture with defense-in-depth principles:
 
-1. **GitHub to AWS**: GitHub Actions uses OIDC (OpenID Connect) to assume an AWS IAM role
-2. **AWS Service Access**: IAM roles provide access to:
-   - Bedrock for model invocation
-   - Lambda for function execution
-   - S3 for storage operations
-3. **GitHub API Access**: GitHub token for PR comment creation and repository interactions
+#### 4.1 Authentication Mechanisms
+
+1. **GitHub to AWS Integration**:
+   - **OIDC (OpenID Connect)** federation for secure, token-based authentication
+   - Short-lived credentials with automatic rotation
+   - No long-term access keys stored in GitHub secrets
+   - JWT token validation with audience and subject constraints
+
+2. **AWS Service Authentication**:
+   - **IAM Role-based Access Control** with fine-grained permissions
+   - **Temporary Security Credentials** with limited session duration
+   - **Resource-based policies** on S3 buckets and Lambda functions
+   - **VPC endpoint policies** for private network communication
+
+3. **GitHub API Security**:
+   - **GitHub App installation tokens** with repository-specific scopes
+   - **Rate limiting** to prevent abuse and denial of service
+   - **IP allowlisting** for production deployments
+   - **Webhook payload validation** with secret tokens
+
+#### 4.2 Permission Management
+
+1. **Least Privilege Principle**:
+   - Each component has minimal permissions required for its function
+   - IAM permissions boundaries prevent privilege escalation
+   - Regular permission auditing and right-sizing
+
+2. **Service-specific Permissions**:
+   - **Bedrock**: Limited to specific model invocations with quota enforcement
+   - **Lambda**: Function-specific execution role with scoped permissions
+   - **S3**: Bucket policies with object-level permissions and encryption requirements
+   - **CloudWatch**: Write-only access for logging with retention policies
+
+3. **Security Controls**:
+   - **AWS CloudTrail** logging for all API actions
+   - **AWS Config** rules for continuous compliance monitoring
+   - **IAM Access Analyzer** for external access identification
+   - **Service Control Policies (SCPs)** for organization-wide guardrails
 
 ### 5. Error Handling and Reliability
 
-The pipeline includes several reliability features:
+The pipeline implements enterprise-grade resilience and security measures:
 
-1. **Fallback Mechanisms**:
-   - Lambda can fall back to Amazon Polly if Bedrock TTS fails
-   - Documentation generation has retry logic
+#### 5.1 Fault Tolerance
 
-2. **Robust Output Handling**:
-   - Uses temporary files for complex text content
+1. **Multi-level Fallback Mechanisms**:
+   - Lambda implements graceful degradation with service fallbacks:
+     - Primary: Bedrock Nova Sonic for high-quality TTS
+     - Secondary: Amazon Polly with neural voices
+     - Tertiary: Standard Polly voices with SSML
+   - Documentation generation uses exponential backoff retry logic
+   - Circuit breaker patterns prevent cascading failures
+
+2. **Comprehensive Error Handling**:
+   - Structured error responses with detailed error codes
+   - Contextual error messages with troubleshooting guidance
+   - Error categorization (transient vs. permanent)
+   - Dead-letter queues for failed operations
+
+#### 5.2 Data Security
+
+1. **Data Protection**:
+   - All data encrypted in transit (TLS 1.3)
+   - S3 objects encrypted at rest (SSE-KMS)
+   - Sensitive data redaction in logs and error messages
+   - Automatic PII detection and handling
+
+2. **Secure Data Processing**:
+   - Input validation and sanitization
+   - Output encoding to prevent injection attacks
+   - Temporary file security with proper permissions
+   - Secure deletion of sensitive temporary data
+
+#### 5.3 Observability
+
+1. **Comprehensive Logging**:
+   - Structured logging with correlation IDs
+   - Log level management for different environments
+   - Sensitive data masking in logs
+   - Log retention and archival policies
+
+2. **Monitoring and Alerting**:
+   - Real-time metrics for system health
+   - Custom CloudWatch dashboards
+   - Anomaly detection for unusual patterns
+   - Automated alerting for critical failures
+
+3. **Audit Trail**:
+   - Complete audit logs for all security-relevant events
+   - Immutable audit records
+   - Compliance reporting capabilities
    - Properly handles special characters and formatting
 
 3. **Logging and Monitoring**:
