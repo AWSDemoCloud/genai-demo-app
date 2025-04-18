@@ -203,8 +203,9 @@ jobs:
             
             // Post PR comment for critical/high issues
             if (hasCritical || hasHigh) {
-              const criticalCount = hasCritical && issuesBySeverity['critical'] ? issuesBySeverity['critical'].length : 0;
-              const highCount = hasHigh && issuesBySeverity['high'] ? issuesBySeverity['high'].length : 0;
+              // Count critical and high issues directly from the review data
+              const criticalCount = review.issues ? review.issues.filter(i => i.severity === 'critical').length : 0;
+              const highCount = review.issues ? review.issues.filter(i => i.severity === 'high').length : 0;
               
               await github.rest.issues.createComment({
                 owner: context.repo.owner,
