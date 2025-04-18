@@ -53,7 +53,8 @@ jobs:
           
           # Install Amazon Q CLI extension
           echo "Installing Amazon Q Developer CLI..."
-          pip install amazon-q-developer-cli
+          pip install aws-codewhisperer-cli
+          # Amazon Q Developer is the new name for CodeWhisperer
           
           # Configure AWS credentials
           echo "Configuring AWS credentials..."
@@ -63,14 +64,14 @@ jobs:
           
           # Run Amazon Q code review
           echo "Running Amazon Q code review..."
-          amazon-q-cli review \
-            --diff-file q-diff.txt \
+          aws codewhisperer scan \
+            --source-directory ./ \
             --output-format json \
             --output-file q-review.json \
-            --severity-level low \
-            --check-best-practices \
-            --check-security-issues \
-            --check-code-quality
+            --include-high-severity \
+            --include-medium-severity \
+            --include-low-severity \
+            --include-informational
           
           # Check if review was successful
           if [ -f "q-review.json" ]; then
@@ -90,11 +91,45 @@ jobs:
           github-token: ${{ secrets.GITHUB_TOKEN }}
           script: |
             const fs = require('fs');
-            const review = JSON.parse(fs.readFileSync('q-review.json', 'utf8'));
+            const rawReview = JSON.parse(fs.readFileSync('q-review.json', 'utf8'));
+            
+            // Convert CodeWhisperer/Amazon Q format to our expected format
+            const review = {
+              summary: 'Amazon Q Developer security scan completed',
+              issues: [],
+              suggestions: []
+            };
+            
+            // Process findings from Amazon Q
+            if (rawReview.findings) {
+              rawReview.findings.forEach(finding => {
+                // Map severity
+                let severity = 'info';
+                if (finding.severity === 'HIGH') severity = 'high';
+                if (finding.severity === 'MEDIUM') severity = 'medium';
+                if (finding.severity === 'LOW') severity = 'low';
+                
+                // Add to issues list
+                review.issues.push({
+                  severity: severity,
+                  message: finding.title || finding.description,
+                  location: `${finding.filePath}:${finding.startLine || 0}`
+                });
+                
+                // Add to suggestions if there's a recommendation
+                if (finding.recommendation) {
+                  review.suggestions.push({
+                    file: finding.filePath,
+                    line: finding.startLine || 0,
+                    message: finding.recommendation
+                  });
+                }
+              });
+            }
             
             // Determine check conclusion based on issues
-            const hasCritical = review.issues && review.issues.some(i => i.severity === 'critical');
-            const hasHigh = review.issues && review.issues.some(i => i.severity === 'high');
+            const hasCritical = review.issues.some(i => i.severity === 'critical');
+            const hasHigh = review.issues.some(i => i.severity === 'high');
             
             // Set conclusion based on severity
             let conclusion = 'success';
