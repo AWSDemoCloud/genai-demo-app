@@ -60,47 +60,44 @@ jobs:
           # In a production environment, you would use the actual Amazon Q commands
           echo "Simulating Amazon Q Developer review..."
           
-          cat > q-review-raw.json << EOF
+          # Create a simulated review result with findings in the format expected by our processor
+          cat > q-review.json << EOF
           {
-            "findings": [
+            "summary": "3 security findings detected: 1 HIGH, 1 MEDIUM, 1 LOW",
+            "issues": [
               {
-                "id": "CWE-798",
-                "title": "Hardcoded Credentials",
-                "description": "Potential hardcoded credentials detected in configuration files",
-                "severity": "HIGH",
-                "location": {
-                  "filePath": "lambda/pr-narrator/index.js",
-                  "startLine": 42,
-                  "endLine": 43
-                },
-                "recommendation": "Store credentials in AWS Secrets Manager or as environment variables"
+                "severity": "high",
+                "message": "Hardcoded Credentials: Potential hardcoded credentials detected in configuration files",
+                "location": "lambda/pr-narrator/index.js:42"
               },
               {
-                "id": "CWE-400",
-                "title": "Resource Exhaustion",
-                "description": "Potential resource exhaustion due to missing input validation",
-                "severity": "MEDIUM",
-                "location": {
-                  "filePath": "lambda/pr-narrator/index.js",
-                  "startLine": 87,
-                  "endLine": 90
-                },
-                "recommendation": "Add input validation to limit resource usage"
+                "severity": "medium",
+                "message": "Resource Exhaustion: Potential resource exhaustion due to missing input validation",
+                "location": "lambda/pr-narrator/index.js:87"
               },
               {
-                "id": "BEST-PRACTICE",
-                "title": "Error Handling",
-                "description": "Improve error handling in Lambda function",
-                "severity": "LOW",
-                "location": {
-                  "filePath": "lambda/pr-narrator/index.js",
-                  "startLine": 120,
-                  "endLine": 125
-                },
-                "recommendation": "Add more specific error types and logging"
+                "severity": "low",
+                "message": "Error Handling: Improve error handling in Lambda function",
+                "location": "lambda/pr-narrator/index.js:120"
               }
             ],
-            "summary": "3 security findings detected: 1 HIGH, 1 MEDIUM, 1 LOW",
+            "suggestions": [
+              {
+                "file": "lambda/pr-narrator/index.js",
+                "line": 42,
+                "message": "Store credentials in AWS Secrets Manager or as environment variables"
+              },
+              {
+                "file": "lambda/pr-narrator/index.js",
+                "line": 87,
+                "message": "Add input validation to limit resource usage"
+              },
+              {
+                "file": "lambda/pr-narrator/index.js",
+                "line": 120,
+                "message": "Add more specific error types and logging"
+              }
+            ],
             "scanId": "simulated-scan-$(date +%s)",
             "scanTime": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
           }
@@ -110,12 +107,10 @@ jobs:
           # 1. For GitHub Actions, use OIDC to authenticate with AWS and then use Amazon Q
           # 2. Use the AWS CLI with appropriate IAM roles to run code scans
           
-          # Since we're using a simulated review, we can skip the jq processing
-          # and just copy the raw output to the expected location
-          if [ -s q-review-raw.json ]; then
+          # Since we're now directly creating the q-review.json file in the right format,
+          # we just need to set the status
+          if [ -s q-review.json ]; then
             echo "Amazon Q review completed successfully"
-            # Simply copy the file since it's already in the right format
-            cp q-review-raw.json q-review.json
             echo "review-status=completed" >> $GITHUB_OUTPUT
           else
             echo "Amazon Q review failed, using fallback"
