@@ -21,6 +21,9 @@ jobs:
     name: ❶ Amazon Q Code Review
     runs-on: ubuntu-latest
     timeout-minutes: 10
+    outputs:
+      issues-detected: ${{ steps.process-findings.outputs.issues-detected }}
+      issues-file: ${{ steps.process-findings.outputs.issues-file }}
     
     steps:
       - name: Checkout code
@@ -106,7 +109,6 @@ jobs:
           echo "Running code security scan..."
           aws qbusiness chat-sync \
             --application-id "${{ secrets.Q_APP_ID }}" \
-            --user-id "${{ secrets.Q_USER_ID }}" \
             --user-message "Scan the repository for security vulnerabilities and provide a detailed JSON report" \
             --output json > q-review-raw.json || {
               echo "Amazon Q Business scan failed, using fallback"
@@ -114,36 +116,67 @@ jobs:
             }
       
       - name: Process Amazon Q Findings
+        id: process-findings
         run: |
           echo "Processing Amazon Q Developer findings..."
           
           # Check if the scan produced results
           if [ -f "q-review-raw.json" ] && [ -s "q-review-raw.json" ]; then
-            echo "Amazon Q scan completed successfully"
-            
-            # Process the raw output
-            jq '{
-              summary: (.findings | length | tostring) + " security findings detected",
-              issues: .findings | map({
-                severity: (if .severity == "HIGH" then "high" else if .severity == "MEDIUM" then "medium" else "low" end),
-                message: (.title + ": " + .description),
-                location: (.filePath + ":" + (.startLine | tostring))
-              }),
-              suggestions: .findings | map({
-                file: .filePath,
-                line: .startLine,
-                message: .recommendation
-              }),
-              scanId: .scanId,
-              scanTime: .scanTime
-            }' q-review-raw.json > q-review.json || {
-              echo "Failed to process JSON results, creating minimal report"
+            # Extract the relevant parts from the response
+            jq -r '.messages[1].content' q-review-raw.json > q-review-content.txt || {
+              echo "Failed to extract content from Q response"
+              echo "review-status=extraction-failed" >> $GITHUB_OUTPUT
               echo '{
-                "summary": "Amazon Q scan completed but results processing failed",
+                "summary": "Failed to extract content from Amazon Q response",
+                "issues": [{"severity": "info", "message": "Failed to extract content from response"}],
+                "suggestions": []
+              }' > q-review.json
+              echo "issues-detected=false" >> $GITHUB_OUTPUT
+              echo "issues-file=q-review.json" >> $GITHUB_OUTPUT
+              exit 0
+            }
+            
+            # Try to extract JSON from the response content
+            cat q-review-content.txt | grep -o '{.*}' > q-review-json.txt || {
+              echo "Failed to extract JSON from content"
+              echo "review-status=json-extraction-failed" >> $GITHUB_OUTPUT
+              echo '{
+                "summary": "Failed to extract JSON from Amazon Q response",
+                "issues": [{"severity": "info", "message": "Failed to extract JSON from content"}],
+                "suggestions": []
+              }' > q-review.json
+              echo "issues-detected=false" >> $GITHUB_OUTPUT
+              echo "issues-file=q-review.json" >> $GITHUB_OUTPUT
+              exit 0
+            }
+            
+            # Validate and format the JSON
+            jq '.' q-review-json.txt > q-review.json || {
+              echo "Invalid JSON format in response"
+              echo "review-status=invalid-json" >> $GITHUB_OUTPUT
+              echo '{
+                "summary": "Invalid JSON format in Amazon Q response",
                 "issues": [{"severity": "info", "message": "Failed to process scan results"}],
                 "suggestions": []
               }' > q-review.json
+              echo "issues-detected=false" >> $GITHUB_OUTPUT
+              echo "issues-file=q-review.json" >> $GITHUB_OUTPUT
+              exit 0
             }
+            
+            # Check if there are any issues that can be fixed
+            ISSUE_COUNT=$(jq '.issues | length' q-review.json || echo "0")
+            if [ "$ISSUE_COUNT" -gt 0 ]; then
+              echo "Found $ISSUE_COUNT issues to analyze for potential fixes"
+              echo "issues-detected=true" >> $GITHUB_OUTPUT
+            else
+              echo "No issues detected that need fixing"
+              echo "issues-detected=false" >> $GITHUB_OUTPUT
+            fi
+            
+            # Create a structured issues file for the auto-fix job
+            jq '{ "issues": .issues, "suggestions": .suggestions }' q-review.json > q-issues.json
+            echo "issues-file=q-issues.json" >> $GITHUB_OUTPUT
           else
             echo '{
               "summary": "Amazon Q scan failed to produce results",
@@ -151,7 +184,18 @@ jobs:
               "suggestions": []
             }' > q-review.json
             echo "review-status=no-results" >> $GITHUB_OUTPUT
+            echo "issues-detected=false" >> $GITHUB_OUTPUT
+            echo "issues-file=q-review.json" >> $GITHUB_OUTPUT
           fi
+      
+      - name: Upload review artifacts
+        uses: actions/upload-artifact@v3
+        with:
+          name: q-review-artifacts
+          path: |
+            q-review.json
+            q-issues.json
+          retention-days: 1
       
       - name: Post Amazon Q Review as Check
         uses: actions/github-script@v6
@@ -188,8 +232,252 @@ jobs:
               });
             }
 
+  auto-fix-issues:
+    name: ❷ Auto-Fix Code Issues
+    runs-on: ubuntu-latest
+    needs: amazon-q-review
+    if: needs.amazon-q-review.outputs.issues-detected == 'true'
+    timeout-minutes: 10
+    
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0  # Need full history for PR
+          ref: ${{ github.event.pull_request.head.ref }}
+          token: ${{ secrets.GITHUB_TOKEN }}
+      
+      - name: Configure AWS credentials
+        uses: aws-actions/configure-aws-credentials@v4
+        with:
+          role-to-assume: ${{ secrets.AWS_ROLE_ARN }}
+          role-session-name: auto-fix-${{ github.run_id }}
+          aws-region: ${{ env.AWS_REGION }}
+      
+      - name: Download issues file
+        uses: actions/download-artifact@v3
+        with:
+          name: q-review-artifacts
+          path: ./
+      
+      - name: Analyze issues and generate fixes
+        id: generate-fixes
+        run: |
+          echo "Analyzing issues to generate automatic fixes..."
+          
+          # Read the issues file
+          ISSUES_FILE="${{ needs.amazon-q-review.outputs.issues-file }}"
+          if [ ! -f "$ISSUES_FILE" ]; then
+            echo "Issues file not found: $ISSUES_FILE"
+            echo "fix-status=no-issues-file" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          # Create a directory for fix scripts
+          mkdir -p fixes
+          
+          # Extract issues that can be automatically fixed
+          FIXABLE_ISSUES=$(jq '.issues[] | select(.severity == "low" or .severity == "info") | select(.location != null)' "$ISSUES_FILE")
+          FIXABLE_COUNT=$(echo "$FIXABLE_ISSUES" | grep -c "severity" || echo "0")
+          
+          if [ "$FIXABLE_COUNT" -eq 0 ]; then
+            echo "No automatically fixable issues found"
+            echo "fix-status=no-fixable-issues" >> $GITHUB_OUTPUT
+            exit 0
+          fi
+          
+          echo "Found $FIXABLE_COUNT potentially fixable issues"
+          
+          # Process each fixable issue
+          echo "$FIXABLE_ISSUES" | jq -c '.' | while read -r issue; do
+            SEVERITY=$(echo "$issue" | jq -r '.severity')
+            MESSAGE=$(echo "$issue" | jq -r '.message')
+            LOCATION=$(echo "$issue" | jq -r '.location')
+            
+            # Parse location to get file and line
+            FILE=$(echo "$LOCATION" | cut -d ':' -f 1)
+            LINE=$(echo "$LOCATION" | cut -d ':' -f 2)
+            
+            if [ -f "$FILE" ]; then
+              echo "Generating fix for issue in $FILE:$LINE - $MESSAGE"
+              
+              # Get context around the issue (10 lines before and after)
+              LINE_START=$((LINE - 10))
+              if [ $LINE_START -lt 1 ]; then LINE_START=1; fi
+              LINE_END=$((LINE + 10))
+              
+              # Extract code context
+              CODE_CONTEXT=$(sed -n "${LINE_START},${LINE_END}p" "$FILE")
+              
+              # Create a prompt for Bedrock to generate a fix
+              PROMPT="You are an expert code reviewer and fixer. Please analyze the following code issue and provide a fix:\n\nFile: $FILE\nLine: $LINE\nIssue: $MESSAGE\nSeverity: $SEVERITY\n\nCode context:\n\n```\n$CODE_CONTEXT\n```\n\nPlease provide:\n1. A brief explanation of the issue\n2. The exact code that needs to be changed\n3. The corrected code\n4. A sed command that can be used to apply the fix\n\nFormat your response as a JSON object with the following fields: explanation, original_code, fixed_code, sed_command"
+              
+              # Call Bedrock to generate a fix
+              aws bedrock-runtime invoke-model \
+                --model-id "$MODEL_ID" \
+                --body "{\"anthropic_version\": \"bedrock-2023-05-31\", \"max_tokens\": 1024, \"messages\": [{\"role\": \"user\", \"content\": \"$PROMPT\"}]}" \
+                --cli-binary-format raw-in-base64-out \
+                fixes/response_$(echo "$FILE" | tr '/' '_')_$LINE.json
+              
+              # Extract the fix from the response
+              jq -r '.messages[0].content' fixes/response_$(echo "$FILE" | tr '/' '_')_$LINE.json > fixes/fix_$(echo "$FILE" | tr '/' '_')_$LINE.txt
+            else
+              echo "File not found: $FILE"
+            fi
+          done
+          
+          # Count how many fixes were generated
+          FIX_COUNT=$(ls fixes/fix_* 2>/dev/null | wc -l || echo "0")
+          echo "Generated $FIX_COUNT potential fixes"
+          
+          if [ "$FIX_COUNT" -gt 0 ]; then
+            echo "fix-status=fixes-generated" >> $GITHUB_OUTPUT
+            echo "fix-count=$FIX_COUNT" >> $GITHUB_OUTPUT
+          else
+            echo "fix-status=no-fixes-generated" >> $GITHUB_OUTPUT
+            echo "fix-count=0" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Apply fixes
+        if: steps.generate-fixes.outputs.fix-status == 'fixes-generated'
+        id: apply-fixes
+        run: |
+          echo "Applying generated fixes..."
+          
+          # Initialize counters
+          APPLIED=0
+          FAILED=0
+          
+          # Process each fix file
+          for FIX_FILE in fixes/fix_*.txt; do
+            echo "Processing fix: $FIX_FILE"
+            
+            # Extract the JSON part from the fix file
+            JSON_CONTENT=$(cat "$FIX_FILE" | grep -o '{.*}' || echo "{}")
+            
+            if [ "$JSON_CONTENT" != "{}" ]; then
+              # Extract components from the JSON
+              FILE=$(echo "$JSON_CONTENT" | jq -r '.file // ""')
+              ORIGINAL=$(echo "$JSON_CONTENT" | jq -r '.original_code // ""')
+              FIXED=$(echo "$JSON_CONTENT" | jq -r '.fixed_code // ""')
+              SED_CMD=$(echo "$JSON_CONTENT" | jq -r '.sed_command // ""')
+              
+              # If file path not provided, extract it from filename
+              if [ -z "$FILE" ]; then
+                FILE_PART=$(basename "$FIX_FILE" | sed 's/fix_//g' | sed 's/\.txt$//g')
+                FILE=$(echo "$FILE_PART" | tr '_' '/')
+              fi
+              
+              if [ -f "$FILE" ] && [ -n "$ORIGINAL" ] && [ -n "$FIXED" ]; then
+                echo "Applying fix to $FILE"
+                
+                # Create a temporary file with the fix
+                TEMP_FILE="$(mktemp)"
+                
+                # Try to apply the fix using sed if provided
+                if [ -n "$SED_CMD" ]; then
+                  # Extract the sed expression
+                  SED_EXPR=$(echo "$SED_CMD" | sed -n 's/.*sed -i ["'\'']\(.*\)["'\'']\s\+["'\'']\(.*\)["'\'']\s\+\(.*\)/\1/p')
+                  
+                  if [ -n "$SED_EXPR" ]; then
+                    # Apply sed command to create fixed file
+                    sed "$SED_EXPR" "$FILE" > "$TEMP_FILE"
+                  else
+                    # Fallback to direct replacement
+                    cat "$FILE" | sed "s/$(echo "$ORIGINAL" | sed 's/[\[\]\$\*\.\/]/\\&/g')/$(echo "$FIXED" | sed 's/[\[\]\$\*\.\/]/\\&/g')/g" > "$TEMP_FILE"
+                  fi
+                else
+                  # Fallback to direct replacement
+                  cat "$FILE" | sed "s/$(echo "$ORIGINAL" | sed 's/[\[\]\$\*\.\/]/\\&/g')/$(echo "$FIXED" | sed 's/[\[\]\$\*\.\/]/\\&/g')/g" > "$TEMP_FILE"
+                fi
+                
+                # Check if the fix was applied successfully
+                if cmp -s "$FILE" "$TEMP_FILE"; then
+                  echo "No changes were made to $FILE"
+                  FAILED=$((FAILED+1))
+                else
+                  # Apply the fix
+                  cp "$TEMP_FILE" "$FILE"
+                  echo "Successfully applied fix to $FILE"
+                  APPLIED=$((APPLIED+1))
+                fi
+                
+                # Clean up
+                rm -f "$TEMP_FILE"
+              else
+                echo "Missing required information for fix: file=$FILE, has_original=$([ -n "$ORIGINAL" ] && echo "yes" || echo "no"), has_fixed=$([ -n "$FIXED" ] && echo "yes" || echo "no")"
+                FAILED=$((FAILED+1))
+              fi
+            else
+              echo "Could not extract JSON from fix file: $FIX_FILE"
+              FAILED=$((FAILED+1))
+            fi
+          done
+          
+          echo "Applied $APPLIED fixes successfully, $FAILED fixes failed"
+          echo "applied-count=$APPLIED" >> $GITHUB_OUTPUT
+          echo "failed-count=$FAILED" >> $GITHUB_OUTPUT
+          
+          if [ "$APPLIED" -gt 0 ]; then
+            echo "fix-applied=true" >> $GITHUB_OUTPUT
+          else
+            echo "fix-applied=false" >> $GITHUB_OUTPUT
+          fi
+      
+      - name: Commit and push fixes
+        if: steps.apply-fixes.outputs.fix-applied == 'true'
+        run: |
+          # Configure git
+          git config --global user.name "Amazon Q Auto-Fix Bot"
+          git config --global user.email "auto-fix-bot@example.com"
+          
+          # Stage changes
+          git add .
+          
+          # Commit with a descriptive message
+          git commit -m "🤖 Auto-fix: Applied ${{ steps.apply-fixes.outputs.applied-count }} fixes to code issues
+          
+          Automatically fixed low-severity code issues detected by Amazon Q Developer.
+          These changes address best practices, code style, and minor bugs."
+          
+          # Push changes
+          git push origin ${{ github.event.pull_request.head.ref }}
+      
+      - name: Post fix summary comment
+        if: steps.generate-fixes.outputs.fix-status == 'fixes-generated'
+        uses: actions/github-script@v6
+        with:
+          github-token: ${{ secrets.GITHUB_TOKEN }}
+          script: |
+            const appliedCount = parseInt('${{ steps.apply-fixes.outputs.applied-count || 0 }}');
+            const failedCount = parseInt('${{ steps.apply-fixes.outputs.failed-count || 0 }}');
+            const totalCount = appliedCount + failedCount;
+            
+            let commentBody = `## 🤖 Amazon Q Auto-Fix Summary\n\n`;
+            
+            if (appliedCount > 0) {
+              commentBody += `✅ Successfully applied **${appliedCount}** automatic fixes to code issues detected in this PR.\n\n`;
+              commentBody += `These changes address best practices, code style, and minor bugs. The fixes have been committed directly to this PR.\n\n`;
+            } else {
+              commentBody += `⚠️ Generated **${totalCount}** potential fixes, but none could be automatically applied.\n\n`;
+              commentBody += `Please review the issues manually and consider addressing them in your code.\n\n`;
+            }
+            
+            if (failedCount > 0) {
+              commentBody += `ℹ️ **${failedCount}** potential fixes could not be automatically applied and may require manual intervention.\n\n`;
+            }
+            
+            commentBody += `*This automated fix was powered by Amazon Q Developer and AWS Bedrock.*`;
+            
+            await github.rest.issues.createComment({
+              owner: context.repo.owner,
+              repo: context.repo.repo,
+              issue_number: context.issue.number,
+              body: commentBody
+            });
+
   build-and-test:
-    name: ❷ Build & Test
+    name: ❸ Build & Test
     runs-on: ubuntu-latest
     timeout-minutes: 5
     

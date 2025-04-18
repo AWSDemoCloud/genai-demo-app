@@ -15,9 +15,10 @@
 // Import AWS SDK v3 clients
 const { S3Client, PutObjectCommand, GetObjectCommand } = require('@aws-sdk/client-s3');
 const { getSignedUrl } = require('@aws-sdk/s3-request-presigner');
-const { BedrockRuntimeClient, InvokeModelCommand } = require('@aws-sdk/client-bedrock-runtime');
+const { BedrockRuntimeClient, InvokeModelCommand, InvokeModelWithResponseStreamCommand } = require('@aws-sdk/client-bedrock-runtime');
 const { PollyClient, SynthesizeSpeechCommand } = require('@aws-sdk/client-polly');
 const https = require('https');
+const { Readable } = require('stream');
 
 // Initialize AWS clients with proper configuration
 const bedrockClient = new BedrockRuntimeClient({
@@ -32,6 +33,7 @@ const s3Client = new S3Client({
 // Configuration from environment variables with fallbacks
 const BUCKET_NAME = process.env.S3_BUCKET_NAME || 'genai-demo-app-audio';
 const BEDROCK_MODEL_ID = process.env.BEDROCK_MODEL_ID || 'anthropic.claude-3-sonnet-20240229-v1:0';
+const BEDROCK_TTS_MODEL_ID = process.env.BEDROCK_TTS_MODEL_ID || 'amazon.titan-text-to-speech-expressive-v1';
 const VOICE_ID = process.env.VOICE_ID || 'alloy';
 const GITHUB_TOKEN = process.env.GITHUB_TOKEN; // For GitHub API calls
 const USE_POLLY_FALLBACK = process.env.USE_POLLY_FALLBACK === 'true';
@@ -237,37 +239,31 @@ async function fetchGitHubPRDetails(owner, repo, prNumber) {
 }
 
 /**
- * Generate audio using Bedrock Nova Sonic with enhanced SSML formatting
+ * Generate audio using Bedrock Titan Text-to-Speech with enhanced SSML formatting
  * 
  * @param {string} text - The text to convert to audio
  * @returns {Promise<Buffer>} The audio data as a Buffer
  */
 async function generateAudio(text) {
   try {
-    logger.info('Generating audio with Bedrock Nova Sonic');
+    logger.info('Generating audio with Bedrock Titan Text-to-Speech');
     
     // Format the text with SSML to enhance audio quality and engagement
     const enhancedText = formatTextWithSSML(text);
     
-    // Prepare the request payload for Bedrock with advanced settings
+    // Prepare the request payload for Bedrock TTS
     const payload = JSON.stringify({
       text: enhancedText,
-      voice_id: VOICE_ID,
-      accept_format: 'mp3',
-      // Add additional audio quality parameters
-      audio_config: {
-        sample_rate: 24000,     // Higher sample rate for better quality
-        encoding: 'mp3',
-        bit_rate: 320000       // Higher bit rate for clearer audio
+      accept: "audio/mpeg",
+      textType: "ssml",
+      voice: {
+        name: VOICE_ID
+      },
+      engine: "long-form",  // Use long-form engine for better narration
+      outputFormat: {
+        sampleRate: 24000,  // Higher sample rate for better quality
+        bitrate: "320k"     // Higher bit rate for clearer audio
       }
-    });
-    
-    // Invoke Bedrock model with enhanced parameters
-    const command = new InvokeModelCommand({
-      modelId: BEDROCK_MODEL_ID,
-      contentType: 'application/json',
-      accept: 'audio/mpeg',
-      body: Buffer.from(payload)
     });
     
     // In a production environment, this would be a real call to Bedrock
@@ -278,20 +274,28 @@ async function generateAudio(text) {
     }
     
     // Log request details for debugging
-    logger.debug('Bedrock request payload:', payload);
+    logger.debug('Bedrock TTS request payload:', payload);
     
-    // Make the actual API call to Bedrock
+    // Invoke Bedrock TTS model with correct parameters
+    const command = new InvokeModelCommand({
+      modelId: BEDROCK_TTS_MODEL_ID,
+      contentType: 'application/json',
+      accept: 'audio/mpeg',  // This is the correct accept type for TTS
+      body: Buffer.from(payload)
+    });
+    
+    // Make the API call to Bedrock
     const response = await bedrockClient.send(command);
     
     // Extract the audio data from the response
     if (response.body) {
-      logger.info('Successfully generated audio with Bedrock');
-      return Buffer.from(response.body);
+      logger.info('Successfully generated audio with Bedrock TTS');
+      return Buffer.from(await streamToBuffer(response.body));
     } else {
-      throw new Error('Bedrock response did not contain audio data');
+      throw new Error('Bedrock TTS response did not contain audio data');
     }
   } catch (error) {
-    logger.error('Error generating audio with Bedrock:', error);
+    logger.error('Error generating audio with Bedrock TTS:', error);
     throw new Error(`Failed to generate audio: ${error.message}`);
   }
 }
