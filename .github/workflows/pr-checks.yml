@@ -50,62 +50,54 @@ jobs:
           sudo ./aws/install --update
           aws --version
       
+      - name: Install Amazon Q CLI
+        run: |
+          echo "Installing Amazon Q CLI..."
+          # Install Amazon Q CLI using Homebrew (for macOS runners)
+          if [[ "$RUNNER_OS" == "macOS" ]]; then
+            brew install amazon-q
+          # For Linux runners
+          elif [[ "$RUNNER_OS" == "Linux" ]]; then
+            # Download the latest Amazon Q CLI AppImage
+            curl -L -o amazon-q-cli.AppImage https://desktop-release.q.us-east-1.amazonaws.com/latest/amazon-q-cli.AppImage
+            chmod +x amazon-q-cli.AppImage
+            sudo mv amazon-q-cli.AppImage /usr/local/bin/q
+          fi
+          
+          # Verify installation
+          q --version
+      
       - name: Run Amazon Q Review
         id: q-review
         run: |
-          # In CI/CD environment, we'll use the AWS credentials already configured
-          # The Configure AWS credentials step earlier in the workflow handles this
+          echo "Running actual Amazon Q Developer code review..."
           
-          # For demonstration purposes, we'll create a simulated Amazon Q review
-          # In a production environment, you would use the actual Amazon Q commands
-          echo "Simulating Amazon Q Developer review..."
+          # Configure AWS credentials for Amazon Q
+          export AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}"
+          export AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}"
+          export AWS_REGION="us-east-1"
           
-          # Create a simulated review result with findings in the format expected by our processor
-          cat > q-review.json << EOF
-          {
-            "summary": "3 security findings detected: 1 HIGH, 1 MEDIUM, 1 LOW",
-            "issues": [
-              {
-                "severity": "high",
-                "message": "Hardcoded Credentials: Potential hardcoded credentials detected in configuration files",
-                "location": "lambda/pr-narrator/index.js:42"
-              },
-              {
-                "severity": "medium",
-                "message": "Resource Exhaustion: Potential resource exhaustion due to missing input validation",
-                "location": "lambda/pr-narrator/index.js:87"
-              },
-              {
-                "severity": "low",
-                "message": "Error Handling: Improve error handling in Lambda function",
-                "location": "lambda/pr-narrator/index.js:120"
-              }
-            ],
-            "suggestions": [
-              {
-                "file": "lambda/pr-narrator/index.js",
-                "line": 42,
-                "message": "Store credentials in AWS Secrets Manager or as environment variables"
-              },
-              {
-                "file": "lambda/pr-narrator/index.js",
-                "line": 87,
-                "message": "Add input validation to limit resource usage"
-              },
-              {
-                "file": "lambda/pr-narrator/index.js",
-                "line": 120,
-                "message": "Add more specific error types and logging"
-              }
-            ],
-            "scanId": "simulated-scan-$(date +%s)",
-            "scanTime": "$(date -u +%Y-%m-%dT%H:%M:%SZ)"
-          }
-          EOF
+          # Run Amazon Q code scan on the repository
+          q code scan \
+            --path . \
+            --languages javascript python yaml \
+            --analysis-types security \
+            --output-format json > q-review-raw.json
           
-          # Note: In a real production environment, you would use one of these approaches:
-          # 1. For GitHub Actions, use OIDC to authenticate with AWS and then use Amazon Q
-          # 2. Use the AWS CLI with appropriate IAM roles to run code scans
+          # Process the raw output into our expected format
+          jq '{
+            summary: (.findings | length | tostring) + " security findings detected",
+            issues: .findings | map({
+              severity: (if .severity == "HIGH" then "high" else if .severity == "MEDIUM" then "medium" else "low" end),
+              message: (.title + ": " + .description),
+              location: (.filePath + ":" + (.startLine | tostring))
+            }),
+            suggestions: .findings | map({
+              file: .filePath,
+              line: .startLine,
+              message: .recommendation
+            })
+          }' q-review-raw.json > q-review.json
           
           # Since we're now directly creating the q-review.json file in the right format,
           # we just need to set the status

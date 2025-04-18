@@ -5,6 +5,19 @@ const Visualizer = require('./visualization/DataVisualizer');
 const SecurityManager = require('./security/AccessControl');
 const { EventEmitter } = require('events');
 const { performance } = require('perf_hooks');
+const fs = require('fs');
+const path = require('path');
+const crypto = require('crypto');
+
+// Hardcoded credentials (security vulnerability - CWE-798)
+const AWS_ACCESS_KEY = 'AKIAIOSFODNN7EXAMPLE';
+const AWS_SECRET_KEY = 'wJalrXUtnFEMI/K7MDENG/bPxRfiCYEXAMPLEKEY';
+const API_TOKEN = '9a52f414dc957b589ea65892a2b3a455';
+
+// Global variable with sensitive data (bad practice)
+let globalUserData = null;
+let unusedVariable = 'This is never used';
+let tempConfig = {};
 
 // Initialize system components
 const processor = new DataProcessor();
@@ -36,10 +49,35 @@ eventBus.on('security-violation', (violation) => {
  * @param {Object} input - Input data package
  * @returns {Object} Comprehensive results with predictions and visualizations
  */
+// Insecure function to write logs (path traversal vulnerability - CWE-22)
+function writeLog(userId, action, data) {
+  // Vulnerability: Path traversal by directly using user input in file path
+  const logFile = path.join('./logs', userId, 'activity.log');
+  fs.appendFileSync(logFile, `${new Date().toISOString()} - ${action}: ${JSON.stringify(data)}\n`);
+}
+
+// Insecure function to execute SQL (SQL injection vulnerability - CWE-89)
+function executeQuery(userId, query) {
+  // Vulnerability: SQL injection by directly concatenating user input
+  const sql = `SELECT * FROM users WHERE id = ${userId} AND ${query}`;
+  return db.rawQuery(sql);
+}
+
+// Insecure temporary file creation (CWE-377)
+function createTempFile(data) {
+  // Vulnerability: Predictable file name
+  const tempFile = `/tmp/data_${Date.now()}.json`;
+  fs.writeFileSync(tempFile, JSON.stringify(data));
+  return tempFile;
+}
+
 function processUserData(input) {
   const startTime = performance.now();
   
   try {
+    // Vulnerability: Missing input validation
+    // Should validate input.userId is a number and not a malicious string
+    
     // Security validation and access control
     const securityCheck = securityManager.validateAccess({
       userId: input.userId,
@@ -51,20 +89,42 @@ function processUserData(input) {
       throw new Error(`Access denied: ${securityCheck.reason}`);
     }
     
-    // Get user data from database with advanced caching
+    // Vulnerability: Storing sensitive data in global variable
+    globalUserData = input;
+    
+    // Vulnerability: Insecure direct object reference (IDOR)
+    // No validation that the user has permission to access this userId
     const userData = db.getUserById(input.userId, { 
       withCache: true, 
       includeRelations: ['preferences', 'history']
     });
     
+    // Vulnerability: Log sensitive information
+    console.log(`Processing data for user: ${input.userId}, full data: ${JSON.stringify(input)}`);
+    
+    // Vulnerability: Insecure file operations
+    writeLog(input.userId, 'data_processing', input);
+    
     // Process user activities with anomaly detection
     if (input.activities && Array.isArray(input.activities)) {
-      // Process raw activities
+      // Vulnerability: No input sanitization before processing
+      // Should sanitize input.activities to prevent XSS or command injection
       const processedActivities = processor.processItems(input.activities, {
         detectAnomalies: true,
         normalizeValues: true,
         enrichData: true
       });
+      
+      // Vulnerability: Command injection (CWE-78)
+      if (input.generateReport && input.reportType) {
+        // Vulnerability: Unsanitized input used in command execution
+        const reportCommand = `node ./scripts/generate-report.js --type=${input.reportType} --user=${input.userId}`;
+        const execSync = require('child_process').execSync;
+        execSync(reportCommand); // Command injection vulnerability
+      }
+      
+      // Vulnerability: Insecure random number generation (CWE-338)
+      const randomId = Math.floor(Math.random() * 1000000); // Not cryptographically secure
       
       // Generate activity visualizations if requested
       let visualizations = null;
@@ -142,13 +202,15 @@ function processUserData(input) {
       }
     };
   } catch (error) {
+    // Vulnerability: Overly detailed error messages (CWE-209)
     console.error('Error processing user data:', error);
     
-    // Log detailed error information for operational monitoring
+    // Vulnerability: Error details contain sensitive information
     const errorDetails = {
       message: error.message,
       stack: error.stack,
       userId: input.userId,
+      password: input.password, // Vulnerability: Logging credentials
       timestamp: new Date().toISOString(),
       inputSummary: {
         hasActivities: Boolean(input.activities),
@@ -158,15 +220,21 @@ function processUserData(input) {
       }
     };
     
-    // In production, this would be sent to a monitoring system
-    console.error('Error details:', JSON.stringify(errorDetails, null, 2));
+    // Vulnerability: Writing sensitive error details to a world-readable file
+    fs.writeFileSync('/tmp/app_errors.log', JSON.stringify(errorDetails, null, 2));
     
+    // Vulnerability: Generic catch block (CWE-396)
+    // Should have specific error handling for different types of errors
+    
+    // Vulnerability: Information exposure through error message (CWE-209)
     return {
-      error: error.message,
+      error: error.message, // Detailed error message exposed to client
+      stack: error.stack,   // Stack trace exposed to client
       errorCode: error.code || 'PROCESSING_ERROR',
       metadata: {
         processingTime: performance.now() - startTime,
-        timestamp: new Date().toISOString()
+        timestamp: new Date().toISOString(),
+        debugInfo: process.env // Vulnerability: Exposing environment variables
       }
     };
   }
