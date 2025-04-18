@@ -53,23 +53,30 @@ jobs:
           
           # For demo, simulate the review output with security findings
           echo '{
-            "summary":"Security review completed successfully. Found minor issues that should be addressed but no critical vulnerabilities.",
+            "summary":"Security review identified multiple critical issues in the code changes. Found hardcoded credentials, SQL injection vulnerabilities, command injection risks, and insecure data handling.",
             "issues":[
-              {"severity":"medium","message":"Consider improving password validation in authenticateUser function","location":"app/index.js:25-27"},
-              {"severity":"low","message":"Potential information disclosure in error messages","location":"app/index.js:132-134"},
-              {"severity":"info","message":"Consider adding input validation for user activities","location":"app/index.js:77-79"},
-              {"severity":"info","message":"Use environment variables for configuration","location":"app/index.js:9-10"}
+              {"severity":"critical","message":"Hardcoded credentials detected in app/index.js","location":"app/index.js:9-10"},
+              {"severity":"critical","message":"SQL injection vulnerability in database query","location":"app/index.js:58"},
+              {"severity":"high","message":"Command injection vulnerability in executeCommand function","location":"app/index.js:40-42"},
+              {"severity":"high","message":"Insecure random number generation for session IDs","location":"app/index.js:74"},
+              {"severity":"high","message":"Sensitive data exposure in error messages","location":"app/index.js:132-134"},
+              {"severity":"medium","message":"Prototype pollution vulnerability in user configuration handling","location":"app/index.js:77-79"},
+              {"severity":"medium","message":"Insecure HTTP request without TLS verification","location":"app/index.js:133-135"},
+              {"severity":"medium","message":"API key exposed in HTTP headers","location":"app/index.js:136-138"}
             ],
             "suggestions":[
-              {"file":"app/index.js","line":25,"message":"Implement stronger password validation with minimum requirements"},
-              {"file":"app/index.js","line":77,"message":"Add validation for array contents before processing"},
-              {"file":"app/index.js","line":9,"message":"Move configuration to environment variables"},
-              {"file":"app/index.js","line":132,"message":"Limit error details exposed to users"}
+              {"file":"app/index.js","line":9,"message":"Remove hardcoded credentials and use environment variables or a secure secret management service"},
+              {"file":"app/index.js","line":58,"message":"Use parameterized queries or an ORM to prevent SQL injection"},
+              {"file":"app/index.js","line":40,"message":"Validate and sanitize user input before using in command execution"},
+              {"file":"app/index.js","line":74,"message":"Use crypto.randomBytes() for generating secure random values"},
+              {"file":"app/index.js","line":132,"message":"Avoid exposing detailed error information to users"}
             ],
             "securityIssues":[
-              {"severity":"medium","description":"Basic password validation","remediation":"Implement password strength requirements"},
-              {"severity":"low","description":"Error handling improvements needed","remediation":"Implement proper error handling with limited exposure"},
-              {"severity":"info","description":"Configuration best practices","remediation":"Use environment variables for configuration"}
+              {"severity":"critical","description":"Hardcoded API keys and database credentials","remediation":"Store secrets in environment variables or use AWS Secrets Manager"},
+              {"severity":"critical","description":"SQL injection through unsanitized user input","remediation":"Use parameterized queries and input validation"},
+              {"severity":"high","description":"Command injection vulnerability","remediation":"Use allowlists and proper input sanitization for system commands"},
+              {"severity":"high","description":"Insecure authentication mechanism","remediation":"Implement proper password hashing with bcrypt or Argon2"},
+              {"severity":"medium","description":"Sensitive data logging","remediation":"Implement proper data masking for sensitive information in logs"}
             ]
           }' > q-review.json
           
@@ -86,127 +93,32 @@ jobs:
             
             // Determine check conclusion based on issues
             const hasCritical = review.issues && review.issues.some(i => i.severity === 'critical');
-            const hasHigh = review.issues && review.issues.some(i => i.severity === 'high');
+            const conclusion = hasCritical ? 'failure' : 'success';
             
-            // Set conclusion based on severity
-            let conclusion = 'success';
-            if (hasCritical) {
-              conclusion = 'failure';
-            } else if (hasHigh) {
-              conclusion = 'neutral';
-            }
-            
-            // Create check output with enhanced security information
+            // Create check output
             const output = {
-              title: 'Amazon Q Security Review',
+              title: 'Amazon Q Code Review',
               summary: review.summary || 'Code review completed',
-              text: '## Security Analysis Results\n\n'
+              text: '### Issues\n' + 
+                (review.issues && review.issues.length > 0 
+                  ? review.issues.map(i => `- **${i.severity}**: ${i.message}`).join('\n')
+                  : 'No issues found') + 
+                '\n\n### Suggestions\n' +
+                (review.suggestions && review.suggestions.length > 0
+                  ? review.suggestions.map(s => `- **${s.file}:${s.line}**: ${s.message}`).join('\n')
+                  : 'No suggestions')
             };
-            
-            // Add security badge based on findings
-            if (hasCritical) {
-              output.text += '⛔ **CRITICAL SECURITY ISSUES DETECTED** ⛔\n\n';
-            } else if (hasHigh) {
-              output.text += '⚠️ **HIGH SEVERITY SECURITY ISSUES DETECTED** ⚠️\n\n';
-            } else {
-              output.text += '✅ **NO CRITICAL SECURITY ISSUES DETECTED** ✅\n\n';
-            }
-            
-            // Add issues section with severity grouping
-            if (review.issues && review.issues.length > 0) {
-              output.text += '### Security Issues\n\n';
-              
-              // Group issues by severity
-              const severityOrder = ['critical', 'high', 'medium', 'low', 'info'];
-              const issuesBySeverity = {};
-              
-              review.issues.forEach(issue => {
-                const severity = issue.severity || 'info';
-                if (!issuesBySeverity[severity]) {
-                  issuesBySeverity[severity] = [];
-                }
-                issuesBySeverity[severity].push(issue);
-              });
-              
-              // Add issues in order of severity
-              severityOrder.forEach(severity => {
-                if (issuesBySeverity[severity] && issuesBySeverity[severity].length > 0) {
-                  const emoji = severity === 'critical' ? '🔴' : 
-                               severity === 'high' ? '🟠' :
-                               severity === 'medium' ? '🟡' :
-                               severity === 'low' ? '🔵' : 'ℹ️';
-                  
-                  output.text += `#### ${emoji} ${severity.toUpperCase()} Severity Issues\n\n`;
-                  issuesBySeverity[severity].forEach(issue => {
-                    output.text += `- **${issue.message}**\n`;
-                    if (issue.location) {
-                      output.text += `  - Location: \`${issue.location}\`\n`;
-                    }
-                  });
-                  output.text += '\n';
-                }
-              });
-            } else {
-              output.text += '### Issues\n\nNo issues found\n\n';
-            }
-            
-            // Add suggestions section
-            output.text += '### Remediation Suggestions\n\n';
-            if (review.suggestions && review.suggestions.length > 0) {
-              review.suggestions.forEach(s => {
-                output.text += `- **${s.file}:${s.line}**: ${s.message}\n`;
-              });
-            } else {
-              output.text += 'No suggestions\n';
-            }
-            
-            // Add detailed security issues section if available
-            if (review.securityIssues && review.securityIssues.length > 0) {
-              output.text += '\n### Detailed Security Analysis\n\n';
-              review.securityIssues.forEach(issue => {
-                const severityEmoji = issue.severity === 'critical' ? '🔴' : 
-                                     issue.severity === 'high' ? '🟠' :
-                                     issue.severity === 'medium' ? '🟡' : '🔵';
-                
-                output.text += `#### ${severityEmoji} ${issue.description}\n\n`;
-                if (issue.remediation) {
-                  output.text += `**Remediation:** ${issue.remediation}\n\n`;
-                }
-              });
-            }
-            
-            // Add security best practices section
-            output.text += '\n### Security Best Practices\n\n';
-            output.text += '1. **Never store credentials in code** - Use environment variables or a secrets manager\n';
-            output.text += '2. **Always validate user input** - Prevent injection attacks\n';
-            output.text += '3. **Use parameterized queries** - Prevent SQL injection\n';
-            output.text += '4. **Implement proper authentication** - Use secure password hashing\n';
-            output.text += '5. **Secure your API endpoints** - Validate all requests\n';
             
             // Post check
             await github.rest.checks.create({
               owner: context.repo.owner,
               repo: context.repo.repo,
-              name: 'Amazon Q Security Review',
+              name: 'Amazon Q Code Review',
               head_sha: context.payload.pull_request.head.sha,
               status: 'completed',
               conclusion: conclusion,
               output: output
             });
-            
-            // Post PR comment for critical/high issues
-            if (hasCritical || hasHigh) {
-              // Count critical and high issues directly from the review data
-              const criticalCount = review.issues ? review.issues.filter(i => i.severity === 'critical').length : 0;
-              const highCount = review.issues ? review.issues.filter(i => i.severity === 'high').length : 0;
-              
-              await github.rest.issues.createComment({
-                owner: context.repo.owner,
-                repo: context.repo.repo,
-                issue_number: context.payload.pull_request.number,
-                body: `## ⚠️ Security Alert: ${criticalCount} critical and ${highCount} high severity issues detected\n\n${review.summary}\n\n[View detailed security analysis in PR checks](${context.payload.repository.html_url}/pull/${context.payload.pull_request.number}/checks)`
-              });
-            }
 
 # ──────────────────────────────────────────────────────────────
   build-and-test:
