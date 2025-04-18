@@ -42,23 +42,13 @@ jobs:
           git diff --text ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} > q-diff.txt
           echo "Diff size: $(stat -c%s q-diff.txt || wc -c < q-diff.txt) bytes"
       
-      - name: Install Amazon Q Developer CLI
+      - name: Install AWS CLI v2
         run: |
           # Install the latest AWS CLI v2
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
           unzip -q awscliv2.zip
           sudo ./aws/install --update
           aws --version
-          
-          # Install Amazon Q Developer CLI for Linux (minimal installation for CI/CD)
-          # Using the zip file installer for Linux as per AWS docs
-          mkdir -p amazon-q-cli
-          curl -Lo amazon-q-minimal.zip "https://d3f521yvtviit2.cloudfront.net/amazon-q-cli/amazon-q-cli-linux-x86_64-minimal-latest.zip"
-          unzip -q amazon-q-minimal.zip -d amazon-q-cli
-          sudo amazon-q-cli/install
-          
-          # Verify installation
-          q --version
       
       - name: Run Amazon Q Review
         id: q-review
