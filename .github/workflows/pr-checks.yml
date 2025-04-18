@@ -53,30 +53,23 @@ jobs:
           
           # For demo, simulate the review output with security findings
           echo '{
-            "summary":"Security review identified multiple critical issues in the code changes. Found hardcoded credentials, SQL injection vulnerabilities, command injection risks, and insecure data handling.",
+            "summary":"Security review completed successfully. Found minor issues that should be addressed but no critical vulnerabilities.",
             "issues":[
-              {"severity":"critical","message":"Hardcoded credentials detected in app/index.js","location":"app/index.js:9-10"},
-              {"severity":"critical","message":"SQL injection vulnerability in database query","location":"app/index.js:58"},
-              {"severity":"high","message":"Command injection vulnerability in executeCommand function","location":"app/index.js:40-42"},
-              {"severity":"high","message":"Insecure random number generation for session IDs","location":"app/index.js:74"},
-              {"severity":"high","message":"Sensitive data exposure in error messages","location":"app/index.js:132-134"},
-              {"severity":"medium","message":"Prototype pollution vulnerability in user configuration handling","location":"app/index.js:77-79"},
-              {"severity":"medium","message":"Insecure HTTP request without TLS verification","location":"app/index.js:133-135"},
-              {"severity":"medium","message":"API key exposed in HTTP headers","location":"app/index.js:136-138"}
+              {"severity":"medium","message":"Consider improving password validation in authenticateUser function","location":"app/index.js:25-27"},
+              {"severity":"low","message":"Potential information disclosure in error messages","location":"app/index.js:132-134"},
+              {"severity":"info","message":"Consider adding input validation for user activities","location":"app/index.js:77-79"},
+              {"severity":"info","message":"Use environment variables for configuration","location":"app/index.js:9-10"}
             ],
             "suggestions":[
-              {"file":"app/index.js","line":9,"message":"Remove hardcoded credentials and use environment variables or a secure secret management service"},
-              {"file":"app/index.js","line":58,"message":"Use parameterized queries or an ORM to prevent SQL injection"},
-              {"file":"app/index.js","line":40,"message":"Validate and sanitize user input before using in command execution"},
-              {"file":"app/index.js","line":74,"message":"Use crypto.randomBytes() for generating secure random values"},
-              {"file":"app/index.js","line":132,"message":"Avoid exposing detailed error information to users"}
+              {"file":"app/index.js","line":25,"message":"Implement stronger password validation with minimum requirements"},
+              {"file":"app/index.js","line":77,"message":"Add validation for array contents before processing"},
+              {"file":"app/index.js","line":9,"message":"Move configuration to environment variables"},
+              {"file":"app/index.js","line":132,"message":"Limit error details exposed to users"}
             ],
             "securityIssues":[
-              {"severity":"critical","description":"Hardcoded API keys and database credentials","remediation":"Store secrets in environment variables or use AWS Secrets Manager"},
-              {"severity":"critical","description":"SQL injection through unsanitized user input","remediation":"Use parameterized queries and input validation"},
-              {"severity":"high","description":"Command injection vulnerability","remediation":"Use allowlists and proper input sanitization for system commands"},
-              {"severity":"high","description":"Insecure authentication mechanism","remediation":"Implement proper password hashing with bcrypt or Argon2"},
-              {"severity":"medium","description":"Sensitive data logging","remediation":"Implement proper data masking for sensitive information in logs"}
+              {"severity":"medium","description":"Basic password validation","remediation":"Implement password strength requirements"},
+              {"severity":"low","description":"Error handling improvements needed","remediation":"Implement proper error handling with limited exposure"},
+              {"severity":"info","description":"Configuration best practices","remediation":"Use environment variables for configuration"}
             ]
           }' > q-review.json
           
