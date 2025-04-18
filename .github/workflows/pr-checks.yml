@@ -50,23 +50,40 @@ jobs:
           sudo ./aws/install --update
           aws --version
       
-      - name: Install Amazon Q CLI
-        run: |
-          echo "Installing Amazon Q Developer CLI..."
-          pip install amazon-q-developer-cli
-          
-      - name: Run Amazon Q Code Review
+      - name: Run Amazon Q Business Security Scan
         id: q-review
         run: |
-          echo "Running Amazon Q Developer code review..."
+          echo "Running Amazon Q Business security scan..."
           
           # Configure AWS credentials
           export AWS_ACCESS_KEY_ID="${{ secrets.AWS_ACCESS_KEY_ID }}"
           export AWS_SECRET_ACCESS_KEY="${{ secrets.AWS_SECRET_ACCESS_KEY }}"
           export AWS_REGION="us-east-1"
           
-          # Run Amazon Q scan with the CLI
-          q scan --files-changed --output-format json --output-file q-review-raw.json || echo "Amazon Q scan command failed, will use fallback"
+          # Set Amazon Q Business parameters
+          export Q_APP_ID="${{ secrets.Q_APP_ID }}"
+          export Q_INDEX_ID="${{ secrets.Q_INDEX_ID }}"
+          export Q_DATA_SOURCE_ID="${{ secrets.Q_DATA_SOURCE_ID }}"
+          export Q_USER_ID="${{ secrets.Q_USER_ID }}"
+          
+          # Trigger GitHub repository sync
+          echo "Syncing GitHub repository with Amazon Q Business..."
+          aws qbusiness start-data-source-sync-job \
+            --application-id "$Q_APP_ID" \
+            --index-id "$Q_INDEX_ID" \
+            --data-source-id "$Q_DATA_SOURCE_ID" || echo "Repository sync failed, continuing..."
+          
+          # Wait for sync to complete (simplified for demo)
+          echo "Waiting for sync to complete..."
+          sleep 30
+          
+          # Run security scan using Amazon Q Business
+          echo "Running code security scan..."
+          aws qbusiness query \
+            --application-id "$Q_APP_ID" \
+            --user-id "$Q_USER_ID" \
+            --input-text "Scan the repository for security vulnerabilities and provide a detailed JSON report" \
+            --output json > q-review-raw.json || echo "Amazon Q Business scan failed, will use fallback"
       
       - name: Process Amazon Q Findings
         run: |
