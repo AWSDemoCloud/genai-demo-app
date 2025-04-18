@@ -42,21 +42,29 @@ jobs:
           git diff --text ${{ github.event.pull_request.base.sha }} ${{ github.event.pull_request.head.sha }} > q-diff.txt
           echo "Diff size: $(stat -c%s q-diff.txt || wc -c < q-diff.txt) bytes"
       
-      - name: Install AWS CLI v2
+      - name: Install Amazon Q Developer CLI
         run: |
+          # Install the latest AWS CLI v2
           curl "https://awscli.amazonaws.com/awscli-exe-linux-x86_64.zip" -o "awscliv2.zip"
           unzip -q awscliv2.zip
           sudo ./aws/install --update
           aws --version
+          
+          # Install Amazon Q Developer CLI
+          curl -Lo amazon-q-cli.zip "https://d3f521yvtviit2.cloudfront.net/amazon-q-cli/amazon-q-cli-linux-x86_64-latest.zip"
+          unzip -q amazon-q-cli.zip
+          sudo ./amazon-q-cli/install
+          q --version
       
       - name: Run Amazon Q Review
         id: q-review
         run: |
-          # Use AWS Q CLI to perform code review on the diff
-          aws q code-scan create \
-            --type-filter SECURITY \
-            --code-modification-file q-diff.txt \
-            --output json > q-review-raw.json
+          # Use Amazon Q Developer CLI to perform code review on the diff
+          q code review \
+            --diff-file q-diff.txt \
+            --security-scan \
+            --best-practices \
+            --output-format json > q-review-raw.json
           
           # Check if the review was successful
           if [ -s q-review-raw.json ]; then
