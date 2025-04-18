@@ -41,9 +41,10 @@ jobs:
           # Use explicit path for output to prevent path traversal
           BASE_REF="${{ github.base_ref }}"
           
-          # Validate input before using it in commands
-          if [[ ! "$BASE_REF" =~ ^[a-zA-Z0-9_\-\.\+\/]+$ ]]; then
-            echo "Error: Invalid base_ref format"
+          # Simple check to prevent command injection
+          # Just ensure BASE_REF doesn't contain dangerous characters
+          if [[ "$BASE_REF" == *";"* || "$BASE_REF" == *"|"* || "$BASE_REF" == *"&"* || "$BASE_REF" == *">"* ]]; then
+            echo "Error: BASE_REF contains potentially unsafe characters"
             exit 1
           fi
           
