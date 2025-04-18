@@ -51,8 +51,8 @@ jobs:
           echo "Running Amazon Q code review..."
           # aws q-dev-agent review --diff-file q-diff.txt --output-file q-review.json
           
-          # For demo, simulate the review output
-          echo '{"summary":"Code changes look good overall. Added proper text handling for git diff and binary file detection.","issues":[{"severity":"info","message":"Consider adding more detailed comments for the binary check logic."}],"suggestions":[{"file":".github/workflows/pr-checks.yml","line":78,"message":"Add a comment explaining why binary files are problematic for diff analysis."}]}' > q-review.json
+          # For demo, simulate a comprehensive Amazon Q code review output
+          echo '{"summary":"Amazon Q identified several security concerns and best practice recommendations in the code changes. The most critical issue is the potential for command injection in the git diff command. There are also several opportunities for performance optimization and improved error handling.","issues":[{"severity":"critical","message":"Potential command injection vulnerability in git diff command where user input is directly concatenated into shell commands without proper sanitization.","location":".github/workflows/pr-checks.yml:38"},{"severity":"high","message":"Hardcoded credentials detected in app/redundant.js. Credentials should be stored in secure credential management systems.","location":"app/redundant.js:5"},{"severity":"medium","message":"Insecure direct object reference (IDOR) vulnerability in lambda/pr-narrator/index.js where user input is used to construct S3 object keys without validation.","location":"lambda/pr-narrator/index.js:425"},{"severity":"medium","message":"Insufficient error handling in Lambda invocation. Errors should be properly caught and reported.","location":".github/workflows/pr-checks.yml:265"},{"severity":"low","message":"Redundant conditional logic in app/redundant.js makes both branches return the same value.","location":"app/redundant.js:2-3"},{"severity":"info","message":"Consider adding more detailed comments for the binary file check logic.","location":".github/workflows/pr-checks.yml:45"}],"suggestions":[{"file":".github/workflows/pr-checks.yml","line":38,"message":"Use GitHub\u0027s built-in context variables and avoid direct concatenation of user inputs in shell commands to prevent command injection."},{"file":"app/redundant.js","line":2,"message":"Fix the redundant conditional logic to return different values based on the condition: if (n % 2 === 0) return true; else return false;"},{"file":"lambda/pr-narrator/index.js","line":425,"message":"Implement proper input validation before using user-supplied values in S3 object keys."},{"file":".github/workflows/pr-checks.yml","line":265,"message":"Implement proper error handling with specific error codes and descriptive messages for Lambda invocation failures."}],"securityIssues":[{"severity":"critical","description":"Command Injection: User-controlled input is directly concatenated into shell commands, allowing potential attackers to inject malicious commands.","recommendation":"Use GitHub\u0027s built-in context variables and avoid direct concatenation of user inputs in shell commands."},{"severity":"high","description":"Hardcoded Credentials: Sensitive information is directly embedded in the source code.","recommendation":"Use GitHub Secrets or AWS Secrets Manager to store and retrieve sensitive information."},{"severity":"medium","description":"Insecure Direct Object Reference (IDOR): User input is used to directly access resources without proper validation.","recommendation":"Implement proper input validation and authorization checks before accessing resources based on user input."}],"performanceIssues":[{"category":"Efficiency","recommendation":"Use GitHub Actions cache to speed up dependency installation."},{"category":"Reliability","recommendation":"Implement retry logic with exponential backoff for all AWS API calls."}],"scanId":"amzn-q-scan-20250418-001","scanTime":"2025-04-18T14:25:30Z"}' > q-review.json
           
           echo "review-status=completed" >> $GITHUB_OUTPUT
       
@@ -241,8 +241,8 @@ jobs:
           DOC_GENERATED: ${{ needs.bedrock-docs.outputs.doc-generated || 'false' }}
           COMMIT_SHA: ${{ github.event.pull_request.head.sha }}
         run: |
-          # Create payload for Lambda
-          echo '{"pr_number": "'$PR_NUMBER'", "repository": "'$REPO_NAME'", "commit_sha": "'$COMMIT_SHA'", "doc_generated": "'$DOC_GENERATED'"}' > lambda-payload.json
+          # Create payload for Lambda with proper JSON formatting
+          echo '{"pr_number": '"$PR_NUMBER"', "repository": "'"$REPO_NAME"'", "commit_sha": "'"$COMMIT_SHA"'", "doc_generated": "'"$DOC_GENERATED"'"}' > lambda-payload.json
           
           echo "Payload content:"
           cat lambda-payload.json
@@ -257,7 +257,7 @@ jobs:
             echo "Found Lambda function: $LAMBDA_FUNCTION"
           fi
           
-          # Invoke Lambda function
+          # Invoke Lambda function with proper payload encoding
           echo "Invoking PR-Narrator Lambda..."
           aws lambda invoke \
             --function-name "$LAMBDA_FUNCTION" \
@@ -265,9 +265,13 @@ jobs:
             --cli-binary-format raw-in-base64-out \
             lambda-response.json
           
+          # Debug Lambda response
+          echo "Lambda response:"
+          cat lambda-response.json || echo "No response file found"
+          
           # For demo purposes, simulate the Lambda response if it doesn't exist
           if [ ! -f lambda-response.json ]; then
-            echo '{"statusCode": 200, "body": {"audio_url": "https://example.com/pr-summary.mp3", "summary": "PR adds improved diff handling with text mode and binary file detection."}}' > lambda-response.json
+            echo '{"statusCode":200,"body":{"audio_url":"https://example.com/pr-summary.mp3","summary":"PR adds improved diff handling with text mode and binary file detection."}}' > lambda-response.json
           fi
           
           # Extract audio URL and summary
